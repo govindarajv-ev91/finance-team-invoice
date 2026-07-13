@@ -1,0 +1,24 @@
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.status-pending {
+  background: #fff4d6;
+  color: #8a6500;
+}
+
+.status-paid {
+  background: #dceeff;
+  color: #0b5a9c;
+}
+
+.status-completed {
+  background: #d8f5e3;
+  color: #1a6b3c;
+}
