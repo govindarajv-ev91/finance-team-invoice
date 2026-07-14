@@ -8,9 +8,19 @@
   white-space: nowrap;
 }
 
+.status-awaiting_ceo {
+  background: #f3e8ff;
+  color: #6b21a8;
+}
+
 .status-pending {
   background: #fff4d6;
   color: #8a6500;
+}
+
+.status-partial {
+  background: #ffedd5;
+  color: #c2410c;
 }
 
 .status-paid {
@@ -21,4 +31,9 @@
 .status-completed {
   background: #d8f5e3;
   color: #1a6b3c;
+}
+
+.status-rejected {
+  background: #fee2e2;
+  color: #991b1b;
 }

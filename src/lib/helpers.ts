@@ -58,13 +58,35 @@ export function formatDate(value: string | null): string {
 
 export function statusLabel(status: Ticket['status']): string {
   switch (status) {
+    case 'awaiting_ceo':
+      return 'Awaiting CEO'
     case 'pending':
-      return 'Pending'
+      return 'CEO Approved — Pay'
+    case 'partial':
+      return 'Partially Paid'
     case 'paid':
       return 'Paid — Awaiting Complete'
     case 'completed':
       return 'Completed'
+    case 'rejected':
+      return 'Rejected'
     default:
       return status
   }
+}
+
+/** Total already paid (cumulative). */
+export function getPaidTotal(ticket: Ticket): number {
+  return Number(ticket.paid_amount ?? 0)
+}
+
+/** Remaining amount still to pay. */
+export function getPendingAmount(ticket: Ticket): number {
+  const total = Number(ticket.amount ?? 0)
+  const paid = getPaidTotal(ticket)
+  return Math.max(0, Math.round((total - paid) * 100) / 100)
+}
+
+export function isFullyPaid(ticket: Ticket): boolean {
+  return getPendingAmount(ticket) <= 0
 }

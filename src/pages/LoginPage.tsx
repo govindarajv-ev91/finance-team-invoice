@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { homeForRole } from '../components/ProtectedRoute'
 import './Auth.css'
 
 export function LoginPage() {
@@ -12,9 +13,9 @@ export function LoginPage() {
   const [submitting, setSubmitting] = useState(false)
 
   if (!loading && profile) {
-    const dest =
-      profile.role === 'admin' ? '/admin' : profile.role === 'finance' ? '/finance' : '/dashboard'
-    return <Navigate to={dest} replace />
+    return (
+      <Navigate to={homeForRole(profile.role, profile.is_approved !== false)} replace />
+    )
   }
 
   async function onSubmit(e: FormEvent) {

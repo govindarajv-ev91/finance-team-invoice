@@ -1,6 +1,8 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { supabase } from '../lib/supabase'
+import type { Department } from '../types/database'
 import './Auth.css'
 
 export function SignupPage() {
@@ -9,9 +11,26 @@ export function SignupPage() {
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [departmentId, setDepartmentId] = useState('')
+  const [departments, setDepartments] = useState<Department[]>([])
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    void supabase
+      .from('departments')
+      .select('*')
+      .order('name')
+      .then(({ data, error: err }) => {
+        if (err) {
+          setError(err.message)
+          return
+        }
+        setDepartments(data ?? [])
+        if (data?.[0]) setDepartmentId(data[0].id)
+      })
+  }, [])
 
   if (!loading && profile) {
     return <Navigate to="/" replace />
@@ -25,9 +44,18 @@ export function SignupPage() {
       setError('Password must be at least 6 characters.')
       return
     }
+    if (!departmentId) {
+      setError('Please select your department.')
+      return
+    }
     setSubmitting(true)
-    // Public signup is user-only; admin/finance are created by admin
-    const { error: err } = await signUp(email.trim(), password, fullName.trim(), 'user')
+    const { error: err } = await signUp(
+      email.trim(),
+      password,
+      fullName.trim(),
+      'user',
+      departmentId,
+    )
     setSubmitting(false)
     if (err) {
       const lower = err.toLowerCase()
@@ -42,8 +70,8 @@ export function SignupPage() {
       }
       return
     }
-    setInfo('Account created. You can sign in now.')
-    setTimeout(() => navigate('/login'), 900)
+    setInfo('Account created. Wait for Admin approval, then sign in.')
+    setTimeout(() => navigate('/login'), 1200)
   }
 
   return (
@@ -51,13 +79,14 @@ export function SignupPage() {
       <div className="auth-hero">
         <p className="auth-eyebrow">Join VoicEV91</p>
         <h1>Create account</h1>
-        <p className="auth-tagline">Register with your name, email, and password to submit invoices.</p>
+        <p className="auth-tagline">Register with your name, email, password and department.</p>
       </div>
 
       <form className="auth-card" onSubmit={onSubmit}>
         <h2>Sign up</h2>
         <p className="muted" style={{ marginTop: 0 }}>
-          This form creates a <strong>User</strong> account only. Finance and Admin accounts are created by the admin team.
+          Each user belongs to <strong>one department</strong>. An Admin must approve you before
+          you can open the invoice page.
         </p>
         <label>
           Full name
@@ -91,9 +120,24 @@ export function SignupPage() {
             autoComplete="new-password"
           />
         </label>
+        <label>
+          Department <span className="req">*</span>
+          <select
+            required
+            value={departmentId}
+            onChange={(e) => setDepartmentId(e.target.value)}
+          >
+            {departments.length === 0 && <option value="">Loading…</option>}
+            {departments.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        </label>
         {error && <p className="form-error">{error}</p>}
         {info && <p className="form-success">{info}</p>}
-        <button type="submit" className="btn btn-primary" disabled={submitting}>
+        <button type="submit" className="btn btn-primary" disabled={submitting || !departmentId}>
           {submitting ? 'Creating…' : 'Create account'}
         </button>
         <p className="auth-footer">

@@ -5,12 +5,12 @@ import { StatusBadge } from '../components/StatusBadge'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { downloadExcel } from '../lib/excel'
-import { formatCurrency, formatDate, getPublicUrl } from '../lib/helpers'
+import { formatCurrency, formatDate, getPaidTotal, getPendingAmount, getPublicUrl } from '../lib/helpers'
 import { matchesSearch } from '../lib/search'
 import type { Department, Profile, Ticket, UserRole } from '../types/database'
 import './Dashboard.css'
 
-type AdminTab = 'overview' | 'tickets' | 'users' | 'create-user' | 'departments' | 'export'
+type AdminTab = 'overview' | 'approvals' | 'tickets' | 'users' | 'create-user' | 'departments' | 'export'
 
 interface UserCredential {
   user_id: string
@@ -22,6 +22,7 @@ interface UserCredential {
 
 const NAV: { id: AdminTab; label: string; hint: string }[] = [
   { id: 'overview', label: 'Overview', hint: 'Status summary' },
+  { id: 'approvals', label: 'User approvals', hint: 'Approve signups' },
   { id: 'tickets', label: 'Tickets', hint: 'All invoices' },
   { id: 'users', label: 'Users & passwords', hint: 'Accounts list' },
   { id: 'create-user', label: 'Create user', hint: 'Add login' },
@@ -39,7 +40,9 @@ export function AdminDashboard() {
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
   const [newDept, setNewDept] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'paid' | 'completed'>('all')
+  const [statusFilter, setStatusFilter] = useState<
+    'all' | 'awaiting_ceo' | 'pending' | 'partial' | 'paid' | 'completed' | 'rejected'
+  >('all')
   const [showPasswords, setShowPasswords] = useState(false)
   const [ticketSearch, setTicketSearch] = useState('')
   const [userSearch, setUserSearch] = useState('')
@@ -49,13 +52,14 @@ export function AdminDashboard() {
   const [newUserEmail, setNewUserEmail] = useState('')
   const [newUserPassword, setNewUserPassword] = useState('')
   const [newUserRole, setNewUserRole] = useState<UserRole>('user')
+  const [newUserDepartmentId, setNewUserDepartmentId] = useState('')
   const [adminPassword, setAdminPassword] = useState('')
   const [creatingUser, setCreatingUser] = useState(false)
 
   const loadAll = useCallback(async () => {
     const [d, u, c, t] = await Promise.all([
       supabase.from('departments').select('*').order('name'),
-      supabase.from('profiles').select('*').order('created_at', { ascending: false }),
+      supabase.from('profiles').select('*, departments(*)').order('created_at', { ascending: false }),
       supabase.from('user_credentials').select('*').order('created_at', { ascending: false }),
       supabase
         .from('tickets')
@@ -77,6 +81,7 @@ export function AdminDashboard() {
     setUsers(u.data ?? [])
     setCredentials((c.data as UserCredential[]) ?? [])
     setTickets((t.data as Ticket[]) ?? [])
+    if (!newUserDepartmentId && d.data?.[0]) setNewUserDepartmentId(d.data[0].id)
   }, [])
 
   useEffect(() => {
@@ -90,15 +95,33 @@ export function AdminDashboard() {
   }, [credentials])
 
   const stats = useMemo(() => {
+    const awaitingCeo = tickets.filter((x) => x.status === 'awaiting_ceo').length
     const pending = tickets.filter((x) => x.status === 'pending').length
+    const partial = tickets.filter((x) => x.status === 'partial').length
     const paid = tickets.filter((x) => x.status === 'paid').length
     const completed = tickets.filter((x) => x.status === 'completed').length
     const totalAmount = tickets.reduce((sum, x) => sum + Number(x.amount), 0)
-    const paidAmount = tickets
-      .filter((x) => x.status === 'paid' || x.status === 'completed')
-      .reduce((sum, x) => sum + Number(x.amount), 0)
-    return { pending, paid, completed, total: tickets.length, totalAmount, paidAmount }
-  }, [tickets])
+    const paidAmount = tickets.reduce((sum, x) => sum + getPaidTotal(x), 0)
+    const pendingAmount = tickets.reduce((sum, x) => sum + getPendingAmount(x), 0)
+    const pendingUsers = users.filter((u) => u.role === 'user' && u.is_approved === false).length
+    return {
+      awaitingCeo,
+      pending,
+      partial,
+      paid,
+      completed,
+      total: tickets.length,
+      totalAmount,
+      paidAmount,
+      pendingAmount,
+      pendingUsers,
+    }
+  }, [tickets, users])
+
+  const pendingApprovals = useMemo(
+    () => users.filter((u) => u.role === 'user' && u.is_approved === false),
+    [users],
+  )
 
   const filteredTickets = useMemo(() => {
     const byStatus = statusFilter === 'all' ? tickets : tickets.filter((t) => t.status === statusFilter)
@@ -114,6 +137,8 @@ export function AdminDashboard() {
         t.profiles?.full_name,
         t.profiles?.email,
         t.paid_by_name,
+        t.utr_number,
+        t.invoice_number,
       ),
     )
   }, [tickets, statusFilter, ticketSearch])
@@ -122,7 +147,14 @@ export function AdminDashboard() {
     () =>
       users.filter((u) => {
         const cred = credByUserId.get(u.id)
-        return matchesSearch(userSearch, u.full_name, u.email, u.role, cred?.password_text)
+        return matchesSearch(
+          userSearch,
+          u.full_name,
+          u.email,
+          u.role,
+          u.departments?.name,
+          cred?.password_text,
+        )
       }),
     [users, userSearch, credByUserId],
   )
@@ -183,6 +215,37 @@ export function AdminDashboard() {
     await loadAll()
   }
 
+  async function updateUserDepartment(userId: string, departmentId: string) {
+    clearMessages()
+    const { error: err } = await supabase
+      .from('profiles')
+      .update({ department_id: departmentId || null })
+      .eq('id', userId)
+    if (err) {
+      setError(err.message)
+      return
+    }
+    await loadAll()
+  }
+
+  async function approveUser(userId: string) {
+    clearMessages()
+    const { error: err } = await supabase
+      .from('profiles')
+      .update({
+        is_approved: true,
+        approved_at: new Date().toISOString(),
+        approved_by: profile?.id ?? null,
+      })
+      .eq('id', userId)
+    if (err) {
+      setError(err.message)
+      return
+    }
+    setInfo('User approved. They can now open the invoice dashboard.')
+    await loadAll()
+  }
+
   async function savePasswordRecord(userId: string, email: string, fullName: string, role: UserRole) {
     const password = window.prompt(`Enter / update password to show for ${email}`)
     if (!password || password.length < 6) {
@@ -232,6 +295,7 @@ export function AdminDashboard() {
       newUserPassword,
       newUserName.trim(),
       newUserRole,
+      newUserRole === 'user' ? newUserDepartmentId || null : null,
     )
 
     if (createErr) {
@@ -259,6 +323,18 @@ export function AdminDashboard() {
       updated_at: new Date().toISOString(),
     })
 
+    // Admin-created accounts are auto-approved
+    await supabase
+      .from('profiles')
+      .update({
+        is_approved: true,
+        approved_at: new Date().toISOString(),
+        approved_by: profile.id,
+        role: newUserRole,
+        department_id: newUserRole === 'user' ? newUserDepartmentId || null : null,
+      })
+      .eq('email', newUserEmail.trim())
+
     setInfo(`User ${newUserEmail} created and password saved.`)
     setNewUserName('')
     setNewUserEmail('')
@@ -269,7 +345,9 @@ export function AdminDashboard() {
     setTab('users')
   }
 
-  function exportTicketsExcel(status: 'all' | 'pending' | 'paid' | 'completed' = 'all') {
+  function exportTicketsExcel(
+    status: 'all' | 'awaiting_ceo' | 'pending' | 'partial' | 'paid' | 'completed' | 'rejected' = 'all',
+  ) {
     const list = status === 'all' ? tickets : tickets.filter((t) => t.status === status)
     const rows = list.map((t) => ({
       Ticket: t.ticket_code,
@@ -277,10 +355,18 @@ export function AdminDashboard() {
       Email: t.profiles?.email ?? '',
       Department: t.departments?.name ?? '',
       Subject: t.subject,
+      'Invoice Number': t.invoice_number ?? '',
+      'Bank Name': t.bank_name ?? '',
+      'Account Number': t.account_number ?? '',
+      'IFSC Code': t.ifsc_code ?? '',
       Remark: t.remark ?? '',
       Amount: Number(t.amount),
+      'Paid Amount': t.paid_amount ?? '',
+      Pending: getPendingAmount(t),
       Status: t.status,
+      'CEO Approved by': t.ceo_approved_by_name ?? '',
       'Paid by': t.paid_by_name ?? '',
+      UTR: t.utr_number ?? '',
       'Paid at': t.paid_at ? formatDate(t.paid_at) : '',
       'Completed at': t.completed_at ? formatDate(t.completed_at) : '',
       Created: formatDate(t.created_at),
@@ -346,15 +432,23 @@ export function AdminDashboard() {
       {tab === 'overview' && (
         <section className="card">
           <h2>Status overview</h2>
-          <p className="muted">Quick summary of all invoice tickets.</p>
+          <p className="muted">Quick summary of approvals and invoice tickets.</p>
           <div className="stats-grid">
-            <button type="button" className="stat-card clickable" onClick={() => { setStatusFilter('all'); switchTab('tickets') }}>
-              <span>Total tickets</span>
-              <strong>{stats.total}</strong>
+            <button type="button" className="stat-card warn clickable" onClick={() => switchTab('approvals')}>
+              <span>Users awaiting approval</span>
+              <strong>{stats.pendingUsers}</strong>
+            </button>
+            <button type="button" className="stat-card clickable" onClick={() => { setStatusFilter('awaiting_ceo'); switchTab('tickets') }}>
+              <span>Awaiting CEO</span>
+              <strong>{stats.awaitingCeo}</strong>
             </button>
             <button type="button" className="stat-card warn clickable" onClick={() => { setStatusFilter('pending'); switchTab('tickets') }}>
-              <span>Pending</span>
+              <span>Ready to pay</span>
               <strong>{stats.pending}</strong>
+            </button>
+            <button type="button" className="stat-card clickable" onClick={() => { setStatusFilter('partial'); switchTab('tickets') }} style={{ background: '#fff7ed', borderColor: '#fdba74' }}>
+              <span>Partially Paid</span>
+              <strong>{stats.partial}</strong>
             </button>
             <button type="button" className="stat-card info clickable" onClick={() => { setStatusFilter('paid'); switchTab('tickets') }}>
               <span>Paid (open)</span>
@@ -364,23 +458,58 @@ export function AdminDashboard() {
               <span>Completed</span>
               <strong>{stats.completed}</strong>
             </button>
-            <div className="stat-card">
-              <span>Total amount</span>
-              <strong>{formatCurrency(stats.totalAmount)}</strong>
-            </div>
             <div className="stat-card ok">
               <span>Paid amount</span>
               <strong>{formatCurrency(stats.paidAmount)}</strong>
             </div>
+            <div className="stat-card warn">
+              <span>Pending balance</span>
+              <strong>{formatCurrency(stats.pendingAmount)}</strong>
+            </div>
           </div>
-          <div className="btn-row" style={{ justifyContent: 'flex-start', marginTop: '0.5rem' }}>
-            <button type="button" className="btn btn-primary" onClick={() => switchTab('tickets')}>
-              Open tickets
-            </button>
-            <button type="button" className="btn btn-ghost" onClick={() => switchTab('export')}>
-              Excel download
-            </button>
-          </div>
+        </section>
+      )}
+
+      {tab === 'approvals' && (
+        <section className="card">
+          <h2>User signup approvals</h2>
+          <p className="muted">Approve new users so they can open the invoice dashboard.</p>
+          {pendingApprovals.length === 0 ? (
+            <p className="empty-hint">No pending user approvals.</p>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Department</th>
+                    <th>Joined</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendingApprovals.map((u) => (
+                    <tr key={u.id}>
+                      <td>{u.full_name}</td>
+                      <td>{u.email}</td>
+                      <td>{u.departments?.name ?? '—'}</td>
+                      <td>{formatDate(u.created_at)}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={() => approveUser(u.id)}
+                        >
+                          Approve
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
       )}
 
@@ -403,14 +532,20 @@ export function AdminDashboard() {
             </div>
           </div>
           <div className="filter-tabs" style={{ margin: '1rem 0' }}>
-            {(['all', 'pending', 'paid', 'completed'] as const).map((f) => (
+            {(['all', 'awaiting_ceo', 'pending', 'partial', 'paid', 'completed', 'rejected'] as const).map((f) => (
               <button
                 key={f}
                 type="button"
                 className={`chip ${statusFilter === f ? 'active' : ''}`}
                 onClick={() => setStatusFilter(f)}
               >
-                {f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
+                {f === 'all'
+                  ? 'All'
+                  : f === 'awaiting_ceo'
+                    ? 'Awaiting CEO'
+                    : f === 'partial'
+                      ? 'Partial'
+                      : f.charAt(0).toUpperCase() + f.slice(1)}
               </button>
             ))}
           </div>
@@ -421,7 +556,7 @@ export function AdminDashboard() {
                   <th>Ticket</th>
                   <th>User</th>
                   <th>Dept</th>
-                  <th>Subject</th>
+                  <th>Subject / Remark</th>
                   <th>Amount</th>
                   <th>Status</th>
                   <th>Paid by</th>
@@ -429,26 +564,46 @@ export function AdminDashboard() {
                 </tr>
               </thead>
               <tbody>
-                {filteredTickets.map((t) => (
-                  <tr key={t.id}>
-                    <td>
-                      <code>{t.ticket_code}</code>
-                    </td>
-                    <td>{t.profiles?.full_name ?? '—'}</td>
-                    <td>{t.departments?.name ?? '—'}</td>
-                    <td>{t.subject}</td>
-                    <td>{formatCurrency(Number(t.amount))}</td>
-                    <td>
-                      <StatusBadge status={t.status} />
-                    </td>
-                    <td>{t.paid_by_name ?? '—'}</td>
-                    <td>
-                      <a href={getPublicUrl(t.bill_path)} target="_blank" rel="noreferrer">
-                        View
-                      </a>
-                    </td>
-                  </tr>
-                ))}
+                {filteredTickets.map((t) => {
+                  const paid = getPaidTotal(t)
+                  const pendingAmt = getPendingAmount(t)
+                  return (
+                    <tr key={t.id}>
+                      <td>
+                        <code>{t.ticket_code}</code>
+                      </td>
+                      <td>{t.profiles?.full_name ?? '—'}</td>
+                      <td>{t.departments?.name ?? '—'}</td>
+                      <td>
+                        <div className="cell-stack">
+                          <span>{t.subject}</span>
+                          <span className="muted tiny">{t.remark ?? '—'}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <div className="cell-stack">
+                          <strong>Total {formatCurrency(Number(t.amount))}</strong>
+                          <span className="muted tiny">Paid {formatCurrency(paid)}</span>
+                          {pendingAmt > 0 ? (
+                            <span className="pending-amt">Pending {formatCurrency(pendingAmt)}</span>
+                          ) : (
+                            <span className="muted tiny">Pending ₹0</span>
+                          )}
+                          {t.utr_number && <span className="muted tiny">UTR {t.utr_number}</span>}
+                        </div>
+                      </td>
+                      <td>
+                        <StatusBadge status={t.status} />
+                      </td>
+                      <td>{t.paid_by_name ?? '—'}</td>
+                      <td>
+                        <a href={getPublicUrl(t.bill_path)} target="_blank" rel="noreferrer">
+                          View
+                        </a>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
             {filteredTickets.length === 0 && (
@@ -488,7 +643,9 @@ export function AdminDashboard() {
                   <th>Name</th>
                   <th>Email / ID</th>
                   <th>Password</th>
+                  <th>Department</th>
                   <th>Role</th>
+                  <th>Approved</th>
                   <th>Joined</th>
                   <th></th>
                 </tr>
@@ -508,14 +665,45 @@ export function AdminDashboard() {
                         )}
                       </td>
                       <td>
+                        {u.role === 'user' ? (
+                          <select
+                            value={u.department_id ?? ''}
+                            onChange={(e) => updateUserDepartment(u.id, e.target.value)}
+                          >
+                            <option value="">—</option>
+                            {departments.map((d) => (
+                              <option key={d.id} value={d.id}>
+                                {d.name}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="muted tiny">—</span>
+                        )}
+                      </td>
+                      <td>
                         <select
                           value={u.role}
                           onChange={(e) => updateRole(u.id, e.target.value as UserRole)}
                         >
                           <option value="user">User</option>
                           <option value="finance">Finance</option>
+                          <option value="ceo">CEO</option>
                           <option value="admin">Admin</option>
                         </select>
+                      </td>
+                      <td>
+                        {u.is_approved === false ? (
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            onClick={() => approveUser(u.id)}
+                          >
+                            Approve
+                          </button>
+                        ) : (
+                          <span className="muted tiny">Yes</span>
+                        )}
                       </td>
                       <td>{formatDate(u.created_at)}</td>
                       <td>
@@ -574,9 +762,26 @@ export function AdminDashboard() {
               <select value={newUserRole} onChange={(e) => setNewUserRole(e.target.value as UserRole)}>
                 <option value="user">User</option>
                 <option value="finance">Finance</option>
+                <option value="ceo">CEO</option>
                 <option value="admin">Admin</option>
               </select>
             </label>
+            {newUserRole === 'user' && (
+              <label>
+                Department <span className="req">*</span>
+                <select
+                  required
+                  value={newUserDepartmentId}
+                  onChange={(e) => setNewUserDepartmentId(e.target.value)}
+                >
+                  {departments.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             {!credByUserId.get(profile?.id ?? '') && (
               <label>
                 Your admin password (to stay signed in)

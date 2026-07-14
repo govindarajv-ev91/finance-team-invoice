@@ -68,11 +68,8 @@
   font-weight: 500;
 }
 
-.auth-footer {
-  margin: 0.25rem 0 0;
-  text-align: center;
-  color: #4a6f58;
-  font-size: 0.9rem;
+.req {
+  color: #c0392b;
 }
 
 .auth-footer a {

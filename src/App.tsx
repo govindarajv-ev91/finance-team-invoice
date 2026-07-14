@@ -1,11 +1,13 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
-import { ProtectedRoute } from './components/ProtectedRoute'
+import { ProtectedRoute, homeForRole } from './components/ProtectedRoute'
 import { LoginPage } from './pages/LoginPage'
 import { SignupPage } from './pages/SignupPage'
 import { UserDashboard } from './pages/UserDashboard'
 import { FinanceDashboard } from './pages/FinanceDashboard'
 import { AdminDashboard } from './pages/AdminDashboard'
+import { CeoDashboard } from './pages/CeoDashboard'
+import { PendingApprovalPage } from './pages/PendingApprovalPage'
 
 function HomeRedirect() {
   const { profile, loading, session } = useAuth()
@@ -21,9 +23,12 @@ function HomeRedirect() {
 
   if (!session || !profile) return <Navigate to="/login" replace />
 
-  if (profile.role === 'admin') return <Navigate to="/admin" replace />
-  if (profile.role === 'finance') return <Navigate to="/finance" replace />
-  return <Navigate to="/dashboard" replace />
+  return (
+    <Navigate
+      to={homeForRole(profile.role, profile.is_approved !== false)}
+      replace
+    />
+  )
 }
 
 export default function App() {
@@ -32,6 +37,14 @@ export default function App() {
       <Route path="/" element={<HomeRedirect />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
+      <Route
+        path="/pending-approval"
+        element={
+          <ProtectedRoute allowUnapproved>
+            <PendingApprovalPage />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/dashboard"
         element={
@@ -45,6 +58,14 @@ export default function App() {
         element={
           <ProtectedRoute roles={['finance', 'admin']}>
             <FinanceDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/ceo"
+        element={
+          <ProtectedRoute roles={['ceo', 'admin']}>
+            <CeoDashboard />
           </ProtectedRoute>
         }
       />

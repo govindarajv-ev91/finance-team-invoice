@@ -9,6 +9,8 @@ import {
   formatCurrency,
   formatDate,
   generateTicketCode,
+  getPaidTotal,
+  getPendingAmount,
   getPublicUrl,
   uploadFile,
 } from '../lib/helpers'
@@ -28,6 +30,10 @@ export function UserDashboard() {
   const [subject, setSubject] = useState('')
   const [remark, setRemark] = useState('')
   const [amount, setAmount] = useState('')
+  const [invoiceNumber, setInvoiceNumber] = useState('')
+  const [bankName, setBankName] = useState('')
+  const [accountNumber, setAccountNumber] = useState('')
+  const [ifscCode, setIfscCode] = useState('')
   const [billFile, setBillFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -52,9 +58,11 @@ export function UserDashboard() {
     if (ticketRes.error) setError(ticketRes.error.message)
     setDepartments(deptRes.data ?? [])
     setTickets((ticketRes.data as Ticket[]) ?? [])
-    setDepartmentId((prev) => prev || deptRes.data?.[0]?.id || '')
+    // One user = one department (from profile)
+    const myDept = profile?.department_id || deptRes.data?.[0]?.id || ''
+    setDepartmentId(myDept)
     setLoading(false)
-  }, [user])
+  }, [user, profile?.department_id])
 
   useEffect(() => {
     void loadData()
@@ -75,8 +83,13 @@ export function UserDashboard() {
           t.remark,
           t.amount,
           t.status,
+          t.invoice_number,
+          t.bank_name,
+          t.account_number,
+          t.ifsc_code,
           t.departments?.name,
           t.paid_by_name,
+          t.utr_number,
         ),
       ),
     [tickets, search],
@@ -94,6 +107,18 @@ export function UserDashboard() {
       setError('Enter a valid amount.')
       return
     }
+    if (!invoiceNumber.trim() || !bankName.trim() || !accountNumber.trim() || !ifscCode.trim()) {
+      setError('Invoice number, bank name, account number and IFSC code are mandatory.')
+      return
+    }
+    if (!remark.trim()) {
+      setError('Remark is mandatory.')
+      return
+    }
+    if (!departmentId) {
+      setError('Your account has no department. Ask Admin to assign one.')
+      return
+    }
     setSaving(true)
     try {
       const ticketCode = await generateTicketCode()
@@ -103,17 +128,25 @@ export function UserDashboard() {
         user_id: user.id,
         department_id: departmentId,
         subject: subject.trim(),
-        remark: remark.trim() || null,
+        remark: remark.trim(),
         amount: amt,
+        invoice_number: invoiceNumber.trim(),
+        bank_name: bankName.trim(),
+        account_number: accountNumber.trim(),
+        ifsc_code: ifscCode.trim().toUpperCase(),
         bill_path: uploaded.path,
         bill_name: uploaded.name,
-        status: 'pending',
+        status: 'awaiting_ceo',
       })
       if (insertError) throw insertError
       setTicketPopup(ticketCode)
       setSubject('')
       setRemark('')
       setAmount('')
+      setInvoiceNumber('')
+      setBankName('')
+      setAccountNumber('')
+      setIfscCode('')
       setBillFile(null)
       await loadData()
     } catch (err) {
@@ -184,21 +217,21 @@ export function UserDashboard() {
     <Layout title={`Welcome, ${profile?.full_name?.split(' ')[0] ?? 'User'}`} sidebar={sidebar}>
       <section className="card">
         <h2>New invoice request</h2>
-        <p className="muted">Department, subject, amount and bill are required. Remark is optional.</p>
+        <p className="muted">
+          After save, the ticket goes to <strong>CEO approval</strong>. Finance can pay only after CEO approves.
+        </p>
         <form className="form-grid" onSubmit={onCreate}>
           <label>
             Department
-            <select
-              required
-              value={departmentId}
-              onChange={(e) => setDepartmentId(e.target.value)}
-            >
-              {departments.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
+            <input
+              type="text"
+              readOnly
+              value={
+                profile?.departments?.name ||
+                departments.find((d) => d.id === departmentId)?.name ||
+                'Not assigned'
+              }
+            />
           </label>
           <label>
             Subject name
@@ -210,7 +243,16 @@ export function UserDashboard() {
             />
           </label>
           <label>
-            Amount (₹)
+            Invoice number <span className="req">*</span>
+            <input
+              required
+              value={invoiceNumber}
+              onChange={(e) => setInvoiceNumber(e.target.value)}
+              placeholder="INV-001"
+            />
+          </label>
+          <label>
+            Amount (₹) <span className="req">*</span>
             <input
               required
               type="number"
@@ -219,6 +261,33 @@ export function UserDashboard() {
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               placeholder="0.00"
+            />
+          </label>
+          <label>
+            Bank name <span className="req">*</span>
+            <input
+              required
+              value={bankName}
+              onChange={(e) => setBankName(e.target.value)}
+              placeholder="e.g. HDFC Bank"
+            />
+          </label>
+          <label>
+            Account number <span className="req">*</span>
+            <input
+              required
+              value={accountNumber}
+              onChange={(e) => setAccountNumber(e.target.value)}
+              placeholder="Bank account number"
+            />
+          </label>
+          <label>
+            IFSC code <span className="req">*</span>
+            <input
+              required
+              value={ifscCode}
+              onChange={(e) => setIfscCode(e.target.value.toUpperCase())}
+              placeholder="HDFC0001234"
             />
           </label>
           <label>
@@ -231,12 +300,13 @@ export function UserDashboard() {
             />
           </label>
           <label className="full">
-            Remark (optional)
+            Remark <span className="req">*</span>
             <textarea
+              required
               rows={3}
               value={remark}
               onChange={(e) => setRemark(e.target.value)}
-              placeholder="Any extra notes…"
+              placeholder="Describe the invoice / payment purpose…"
             />
           </label>
           {error && <p className="form-error full">{error}</p>}
@@ -269,8 +339,9 @@ export function UserDashboard() {
               <thead>
                 <tr>
                   <th>Ticket</th>
-                  <th>Department</th>
-                  <th>Subject</th>
+                  <th>Invoice</th>
+                  <th>Bank / IFSC</th>
+                  <th>Remark</th>
                   <th>Amount</th>
                   <th>Status</th>
                   <th>Created</th>
@@ -282,10 +353,28 @@ export function UserDashboard() {
                   <tr key={t.id}>
                     <td>
                       <code>{t.ticket_code}</code>
+                      <div className="muted tiny">{t.subject}</div>
                     </td>
-                    <td>{t.departments?.name ?? '—'}</td>
-                    <td>{t.subject}</td>
-                    <td>{formatCurrency(Number(t.amount))}</td>
+                    <td>{t.invoice_number ?? '—'}</td>
+                    <td>
+                      <div className="cell-stack">
+                        <span>{t.bank_name ?? '—'}</span>
+                        <span className="muted tiny">{t.account_number}</span>
+                        <span className="muted tiny">{t.ifsc_code}</span>
+                      </div>
+                    </td>
+                    <td>
+                      <span className="muted">{t.remark ?? '—'}</span>
+                    </td>
+                    <td>
+                      <div className="cell-stack">
+                        <strong>{formatCurrency(Number(t.amount))}</strong>
+                        <span className="muted tiny">Paid {formatCurrency(getPaidTotal(t))}</span>
+                        {getPendingAmount(t) > 0 && (
+                          <span className="pending-amt">Pending {formatCurrency(getPendingAmount(t))}</span>
+                        )}
+                      </div>
+                    </td>
                     <td>
                       <StatusBadge status={t.status} />
                     </td>
@@ -309,7 +398,7 @@ export function UserDashboard() {
           <span>Unique Ticket ID</span>
           <strong>{ticketPopup}</strong>
         </div>
-        <p className="muted">Please save this ID for reference. Finance will review your bill next.</p>
+        <p className="muted">Please save this ID. Next step: CEO approval, then Finance payment.</p>
         <button type="button" className="btn btn-primary" onClick={() => setTicketPopup(null)}>
           Done
         </button>

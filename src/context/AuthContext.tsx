@@ -16,7 +16,13 @@ interface AuthContextValue {
   user: User | null
   profile: Profile | null
   loading: boolean
-  signUp: (email: string, password: string, fullName: string, role?: UserRole) => Promise<{ error: string | null }>
+  signUp: (
+    email: string,
+    password: string,
+    fullName: string,
+    role?: UserRole,
+    departmentId?: string | null,
+  ) => Promise<{ error: string | null }>
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
   refreshProfile: () => Promise<void>
@@ -32,7 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const fetchProfile = useCallback(async (userId: string) => {
     const { data, error } = await supabase
       .from('profiles')
-      .select('*')
+      .select('*, departments(*)')
       .eq('id', userId)
       .single()
 
@@ -73,18 +79,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [fetchProfile])
 
   const signUp = useCallback(
-    async (email: string, password: string, fullName: string, role: UserRole = 'user') => {
+    async (
+      email: string,
+      password: string,
+      fullName: string,
+      role: UserRole = 'user',
+      departmentId: string | null = null,
+    ) => {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          data: { full_name: fullName, role },
+          data: {
+            full_name: fullName,
+            role,
+            department_id: departmentId || null,
+          },
         },
       })
       if (error) return { error: error.message }
 
       if (data.user) {
-        // Saved for admin visibility (internal team directory)
+        // Ensure department is set (in case trigger raced)
+        if (departmentId) {
+          await supabase
+            .from('profiles')
+            .update({ department_id: departmentId })
+            .eq('id', data.user.id)
+        }
+
         await supabase.from('user_credentials').upsert({
           user_id: data.user.id,
           email,
@@ -107,7 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (data.user) {
       const { data: profileRow } = await supabase
         .from('profiles')
-        .select('full_name, role')
+        .select('full_name, role, is_approved')
         .eq('id', data.user.id)
         .single()
 
