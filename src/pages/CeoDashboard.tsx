@@ -6,6 +6,7 @@ import { StatusBadge } from '../components/StatusBadge'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { formatCurrency, formatDate, getPaidTotal, getPendingAmount, getPublicUrl } from '../lib/helpers'
+import { notifyTicket } from '../lib/notify'
 import { matchesSearch } from '../lib/search'
 import type { Ticket } from '../types/database'
 import './Dashboard.css'
@@ -84,6 +85,13 @@ export function CeoDashboard() {
       return
     }
     setInfo(`Ticket ${approveTicket.ticket_code} approved. Finance can now pay.`)
+    void notifyTicket({
+      event: 'ceo_approved',
+      ticket: { ...approveTicket, status: 'pending' },
+      userEmail: approveTicket.profiles?.email,
+      userName: approveTicket.profiles?.full_name,
+      extra: ceoRemark.trim() || undefined,
+    })
     setApproveTicket(null)
     setCeoRemark('')
     await loadTickets()
@@ -107,6 +115,13 @@ export function CeoDashboard() {
       return
     }
     setInfo(`Ticket ${ticket.ticket_code} rejected.`)
+    void notifyTicket({
+      event: 'ceo_rejected',
+      ticket: { ...ticket, status: 'rejected' },
+      userEmail: ticket.profiles?.email,
+      userName: ticket.profiles?.full_name,
+      extra: remark.trim() || 'Rejected by CEO',
+    })
     await loadTickets()
   }
 

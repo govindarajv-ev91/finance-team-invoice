@@ -12,6 +12,7 @@ import {
   getPendingAmount,
   getPublicUrl,
 } from '../lib/helpers'
+import { notifyTicket } from '../lib/notify'
 import { matchesSearch } from '../lib/search'
 import type { Ticket } from '../types/database'
 import './Dashboard.css'
@@ -153,6 +154,14 @@ export function FinanceDashboard() {
       return
     }
 
+    const updatedTicket = {
+      ...payTicket,
+      status: nextStatus,
+      paid_amount: newTotalPaid,
+      utr_number: utrNumber.trim(),
+      paid_by_name: payerName.trim(),
+    } as Ticket
+
     if (nextStatus === 'partial') {
       setInfo(
         `Partial payment saved. Paid ${formatCurrency(newTotalPaid)} of ${formatCurrency(Number(payTicket.amount))}. Pending: ${formatCurrency(stillPending)}.`,
@@ -160,6 +169,14 @@ export function FinanceDashboard() {
     } else {
       setInfo(`Full payment saved for ${payTicket.ticket_code}.`)
     }
+    void notifyTicket({
+      event: 'payment_made',
+      ticket: updatedTicket,
+      userEmail: payTicket.profiles?.email,
+      userName: payTicket.profiles?.full_name,
+      extra: `This payment: ${formatCurrency(thisPay)} | UTR: ${utrNumber.trim()} | By: ${payerName.trim()}`,
+      dedupeSuffix: utrNumber.trim(),
+    })
     closePayModal()
     await loadTickets()
   }
@@ -287,6 +304,20 @@ export function FinanceDashboard() {
                           <span className="muted tiny">Waiting CEO</span>
                         ) : t.status === 'paid' ? (
                           <span className="muted tiny">Awaiting user complete</span>
+                        ) : t.status === 'completed' ? (
+                          <div className="cell-stack">
+                            {t.completed_at && (
+                              <span className="muted tiny">{formatDate(t.completed_at)}</span>
+                            )}
+                            {t.completion_remark && <span>{t.completion_remark}</span>}
+                            {t.completion_path ? (
+                              <a href={getPublicUrl(t.completion_path)} target="_blank" rel="noreferrer">
+                                {t.completion_name || 'Completion file'}
+                              </a>
+                            ) : (
+                              <span className="muted tiny">No attachment</span>
+                            )}
+                          </div>
                         ) : (
                           <span className="muted tiny">{formatDate(t.completed_at)}</span>
                         )}

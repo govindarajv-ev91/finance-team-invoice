@@ -6,11 +6,20 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { downloadExcel } from '../lib/excel'
 import { formatCurrency, formatDate, getPaidTotal, getPendingAmount, getPublicUrl } from '../lib/helpers'
+import { notifyTicket } from '../lib/notify'
 import { matchesSearch } from '../lib/search'
 import type { Department, Profile, Ticket, UserRole } from '../types/database'
 import './Dashboard.css'
 
-type AdminTab = 'overview' | 'approvals' | 'tickets' | 'users' | 'create-user' | 'departments' | 'export'
+type AdminTab =
+  | 'overview'
+  | 'approvals'
+  | 'tickets'
+  | 'users'
+  | 'create-user'
+  | 'departments'
+  | 'emails'
+  | 'export'
 
 interface UserCredential {
   user_id: string
@@ -20,6 +29,19 @@ interface UserCredential {
   role: UserRole
 }
 
+interface MailLog {
+  id: string
+  event_type: string
+  ticket_code: string | null
+  recipients: string
+  subject: string
+  status: string
+  error_message: string | null
+  dedupe_key: string | null
+  recipient_count: number | null
+  created_at: string
+}
+
 const NAV: { id: AdminTab; label: string; hint: string }[] = [
   { id: 'overview', label: 'Overview', hint: 'Status summary' },
   { id: 'approvals', label: 'User approvals', hint: 'Approve signups' },
@@ -27,6 +49,7 @@ const NAV: { id: AdminTab; label: string; hint: string }[] = [
   { id: 'users', label: 'Users & passwords', hint: 'Accounts list' },
   { id: 'create-user', label: 'Create user', hint: 'Add login' },
   { id: 'departments', label: 'Departments', hint: 'Manage depts' },
+  { id: 'emails', label: 'Email alerts', hint: 'Admin/CEO/Finance mails' },
   { id: 'export', label: 'Excel download', hint: 'Export data' },
 ]
 
@@ -48,6 +71,14 @@ export function AdminDashboard() {
   const [userSearch, setUserSearch] = useState('')
   const [deptSearch, setDeptSearch] = useState('')
 
+  const [adminEmails, setAdminEmails] = useState('')
+  const [financeEmails, setFinanceEmails] = useState('')
+  const [ceoEmails, setCeoEmails] = useState('')
+  const [mailWebhookUrl, setMailWebhookUrl] = useState('')
+  const [savingEmails, setSavingEmails] = useState(false)
+  const [mailLogs, setMailLogs] = useState<MailLog[]>([])
+  const [mailLogSearch, setMailLogSearch] = useState('')
+
   const [newUserName, setNewUserName] = useState('')
   const [newUserEmail, setNewUserEmail] = useState('')
   const [newUserPassword, setNewUserPassword] = useState('')
@@ -57,7 +88,7 @@ export function AdminDashboard() {
   const [creatingUser, setCreatingUser] = useState(false)
 
   const loadAll = useCallback(async () => {
-    const [d, u, c, t] = await Promise.all([
+    const [d, u, c, t, s, m] = await Promise.all([
       supabase.from('departments').select('*').order('name'),
       supabase.from('profiles').select('*, departments(*)').order('created_at', { ascending: false }),
       supabase.from('user_credentials').select('*').order('created_at', { ascending: false }),
@@ -65,6 +96,8 @@ export function AdminDashboard() {
         .from('tickets')
         .select('*, profiles!user_id(*), departments(*)')
         .order('created_at', { ascending: false }),
+      supabase.from('notification_settings').select('*').eq('id', 1).maybeSingle(),
+      supabase.from('mail_logs').select('*').order('created_at', { ascending: false }).limit(100),
     ])
     if (d.error || u.error || c.error || t.error) {
       setError(
@@ -81,7 +114,14 @@ export function AdminDashboard() {
     setUsers(u.data ?? [])
     setCredentials((c.data as UserCredential[]) ?? [])
     setTickets((t.data as Ticket[]) ?? [])
+    setMailLogs((m.data as MailLog[]) ?? [])
     if (!newUserDepartmentId && d.data?.[0]) setNewUserDepartmentId(d.data[0].id)
+    if (s.data) {
+      setAdminEmails(s.data.admin_emails ?? '')
+      setFinanceEmails(s.data.finance_emails ?? '')
+      setCeoEmails(s.data.ceo_emails ?? '')
+      setMailWebhookUrl(s.data.mail_webhook_url ?? '')
+    }
   }, [])
 
   useEffect(() => {
@@ -93,6 +133,22 @@ export function AdminDashboard() {
     credentials.forEach((c) => map.set(c.user_id, c))
     return map
   }, [credentials])
+
+  const filteredMailLogs = useMemo(() => {
+    const q = mailLogSearch.trim().toLowerCase()
+    if (!q) return mailLogs
+    return mailLogs.filter((row) =>
+      matchesSearch(
+        q,
+        row.ticket_code,
+        row.event_type,
+        row.recipients,
+        row.subject,
+        row.status,
+        row.dedupe_key,
+      ),
+    )
+  }, [mailLogs, mailLogSearch])
 
   const stats = useMemo(() => {
     const awaitingCeo = tickets.filter((x) => x.status === 'awaiting_ceo').length
@@ -131,6 +187,8 @@ export function AdminDashboard() {
         t.ticket_code,
         t.subject,
         t.remark,
+        t.completion_remark,
+        t.completion_name,
         t.amount,
         t.status,
         t.departments?.name,
@@ -230,6 +288,7 @@ export function AdminDashboard() {
 
   async function approveUser(userId: string) {
     clearMessages()
+    const target = users.find((u) => u.id === userId)
     const { error: err } = await supabase
       .from('profiles')
       .update({
@@ -243,7 +302,32 @@ export function AdminDashboard() {
       return
     }
     setInfo('User approved. They can now open the invoice dashboard.')
+    void notifyTicket({
+      event: 'user_approved',
+      userEmail: target?.email,
+      userName: target?.full_name,
+    })
     await loadAll()
+  }
+
+  async function saveEmailSettings(e: FormEvent) {
+    e.preventDefault()
+    clearMessages()
+    setSavingEmails(true)
+    const { error: err } = await supabase.from('notification_settings').upsert({
+      id: 1,
+      admin_emails: adminEmails.trim(),
+      finance_emails: financeEmails.trim(),
+      ceo_emails: ceoEmails.trim(),
+      mail_webhook_url: mailWebhookUrl.trim(),
+      updated_at: new Date().toISOString(),
+    })
+    setSavingEmails(false)
+    if (err) {
+      setError(err.message)
+      return
+    }
+    setInfo('Email alert settings saved.')
   }
 
   async function savePasswordRecord(userId: string, email: string, fullName: string, role: UserRole) {
@@ -360,6 +444,7 @@ export function AdminDashboard() {
       'Account Number': t.account_number ?? '',
       'IFSC Code': t.ifsc_code ?? '',
       Remark: t.remark ?? '',
+      'Completion remark': t.completion_remark ?? '',
       Amount: Number(t.amount),
       'Paid Amount': t.paid_amount ?? '',
       Pending: getPendingAmount(t),
@@ -371,6 +456,7 @@ export function AdminDashboard() {
       'Completed at': t.completed_at ? formatDate(t.completed_at) : '',
       Created: formatDate(t.created_at),
       'Bill file': t.bill_name,
+      'Completion file': t.completion_name ?? '',
     }))
     downloadExcel(rows, 'Tickets', `VoicEV91_Tickets_${status}_${Date.now()}.xlsx`)
     setInfo(`Downloaded ${rows.length} ticket row(s) to Excel.`)
@@ -561,6 +647,7 @@ export function AdminDashboard() {
                   <th>Status</th>
                   <th>Paid by</th>
                   <th>Bill</th>
+                  <th>Completion</th>
                 </tr>
               </thead>
               <tbody>
@@ -593,13 +680,41 @@ export function AdminDashboard() {
                         </div>
                       </td>
                       <td>
-                        <StatusBadge status={t.status} />
+                        <div className="cell-stack">
+                          <StatusBadge status={t.status} />
+                          {t.status === 'completed' && t.completed_at && (
+                            <span className="muted tiny">Done {formatDate(t.completed_at)}</span>
+                          )}
+                        </div>
                       </td>
                       <td>{t.paid_by_name ?? '—'}</td>
                       <td>
                         <a href={getPublicUrl(t.bill_path)} target="_blank" rel="noreferrer">
-                          View
+                          {t.bill_name || 'View bill'}
                         </a>
+                      </td>
+                      <td>
+                        {t.status === 'completed' || t.completion_path || t.completion_remark ? (
+                          <div className="cell-stack">
+                            {t.completed_at && (
+                              <span className="muted tiny">{formatDate(t.completed_at)}</span>
+                            )}
+                            {t.completion_remark ? (
+                              <span title={t.completion_remark}>{t.completion_remark}</span>
+                            ) : (
+                              <span className="muted tiny">No completion remark</span>
+                            )}
+                            {t.completion_path ? (
+                              <a href={getPublicUrl(t.completion_path)} target="_blank" rel="noreferrer">
+                                {t.completion_name || 'View attachment'}
+                              </a>
+                            ) : (
+                              <span className="muted tiny">No attachment</span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="muted tiny">—</span>
+                        )}
                       </td>
                     </tr>
                   )
@@ -843,6 +958,116 @@ export function AdminDashboard() {
             </p>
           )}
         </section>
+      )}
+
+      {tab === 'emails' && (
+        <>
+          <section className="card" style={{ maxWidth: 640 }}>
+            <h2>Email alerts</h2>
+            <p className="muted">
+              Set Admin / Finance / CEO emails manually (comma-separated). User email is taken from the
+              database. One ticket event = one mail_log (duplicates blocked).
+            </p>
+            <form className="stack-form" onSubmit={saveEmailSettings}>
+              <label>
+                Admin emails
+                <input
+                  value={adminEmails}
+                  onChange={(e) => setAdminEmails(e.target.value)}
+                  placeholder="admin@company.com, boss@company.com"
+                />
+              </label>
+              <label>
+                Finance emails
+                <input
+                  value={financeEmails}
+                  onChange={(e) => setFinanceEmails(e.target.value)}
+                  placeholder="finance@company.com"
+                />
+              </label>
+              <label>
+                CEO emails
+                <input
+                  value={ceoEmails}
+                  onChange={(e) => setCeoEmails(e.target.value)}
+                  placeholder="ceo@company.com"
+                />
+              </label>
+              <label>
+                Google Apps Script URL
+                <input
+                  value={mailWebhookUrl}
+                  onChange={(e) => setMailWebhookUrl(e.target.value)}
+                  placeholder="https://script.google.com/macros/s/..../exec"
+                />
+              </label>
+              <p className="muted tiny">
+                Setup: copy code from google-apps-script/VoicEV91-Mail.gs → script.google.com → Deploy as
+                Web app → paste URL here. Full steps in docs/EMAIL-SETUP.md.
+              </p>
+              <button type="submit" className="btn btn-primary" disabled={savingEmails}>
+                {savingEmails ? 'Saving…' : 'Save email settings'}
+              </button>
+            </form>
+          </section>
+
+          <section className="card" style={{ marginTop: 16 }}>
+            <h2>Mail log tracker</h2>
+            <p className="muted">
+              Search by ticket (e.g. AWPBU003). Each row is one send attempt — same ticket + same event
+              cannot create a second row.
+            </p>
+            <SearchBox
+              value={mailLogSearch}
+              onChange={setMailLogSearch}
+              placeholder="Search ticket / event / email…"
+            />
+            <div className="table-wrap" style={{ marginTop: 12 }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>When</th>
+                    <th>Ticket</th>
+                    <th>Event</th>
+                    <th>To (count)</th>
+                    <th>Status</th>
+                    <th>Dedupe key</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredMailLogs.map((row) => (
+                    <tr key={row.id}>
+                      <td>{formatDate(row.created_at)}</td>
+                      <td>{row.ticket_code || '—'}</td>
+                      <td>{row.event_type}</td>
+                      <td title={row.recipients}>
+                        {(row.recipient_count ?? 0) > 0
+                          ? `${row.recipient_count}: ${row.recipients}`
+                          : row.recipients}
+                      </td>
+                      <td>
+                        <span className={`chip ${row.status === 'sent' ? 'active' : ''}`}>
+                          {row.status}
+                        </span>
+                        {row.error_message ? (
+                          <div className="muted tiny">{row.error_message}</div>
+                        ) : null}
+                      </td>
+                      <td className="muted tiny">{row.dedupe_key || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {filteredMailLogs.length === 0 && (
+                <p className="empty-hint">
+                  {mailLogSearch
+                    ? `No mail logs match “${mailLogSearch}”.`
+                    : 'No mails logged yet. Run patch-mail-logs-dedupe.sql if this fails to load.'}
+                </p>
+              )}
+            </div>
+          </section>
+        </>
       )}
 
       {tab === 'export' && (

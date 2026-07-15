@@ -14,6 +14,7 @@ import {
   getPublicUrl,
   uploadFile,
 } from '../lib/helpers'
+import { notifyTicket } from '../lib/notify'
 import { matchesSearch } from '../lib/search'
 import type { Department, Ticket } from '../types/database'
 import './Dashboard.css'
@@ -140,6 +141,18 @@ export function UserDashboard() {
       })
       if (insertError) throw insertError
       setTicketPopup(ticketCode)
+      void notifyTicket({
+        event: 'ticket_created',
+        ticket: {
+          ticket_code: ticketCode,
+          subject: subject.trim(),
+          remark: remark.trim(),
+          amount: amt,
+          profiles: { email: profile?.email, full_name: profile?.full_name },
+        } as Ticket,
+        userEmail: profile?.email,
+        userName: profile?.full_name,
+      })
       setSubject('')
       setRemark('')
       setAmount('')
@@ -162,6 +175,10 @@ export function UserDashboard() {
       setError('Completion attachment is required.')
       return
     }
+    if (!completionRemark.trim()) {
+      setError('Completion remark is mandatory.')
+      return
+    }
     setCompleting(true)
     setError(null)
     try {
@@ -170,13 +187,28 @@ export function UserDashboard() {
         .from('tickets')
         .update({
           status: 'completed',
-          completion_remark: completionRemark.trim() || null,
+          completion_remark: completionRemark.trim(),
           completion_path: uploaded.path,
           completion_name: uploaded.name,
           completed_at: new Date().toISOString(),
         })
         .eq('id', completeTicket.id)
       if (updateError) throw updateError
+      void notifyTicket({
+        event: 'ticket_completed',
+        ticket: {
+          ...completeTicket,
+          status: 'completed',
+          completion_remark: completionRemark.trim(),
+          profiles: {
+            email: profile?.email,
+            full_name: profile?.full_name,
+          },
+        } as Ticket,
+        userEmail: profile?.email,
+        userName: profile?.full_name,
+        extra: completionRemark.trim(),
+      })
       setCompleteTicket(null)
       setCompletionRemark('')
       setCompletionFile(null)
@@ -346,6 +378,7 @@ export function UserDashboard() {
                   <th>Status</th>
                   <th>Created</th>
                   <th>Bill</th>
+                  <th>Completion</th>
                 </tr>
               </thead>
               <tbody>
@@ -376,13 +409,35 @@ export function UserDashboard() {
                       </div>
                     </td>
                     <td>
-                      <StatusBadge status={t.status} />
+                      <div className="cell-stack">
+                        <StatusBadge status={t.status} />
+                        {t.status === 'completed' && t.completed_at && (
+                          <span className="muted tiny">{formatDate(t.completed_at)}</span>
+                        )}
+                      </div>
                     </td>
                     <td>{formatDate(t.created_at)}</td>
                     <td>
                       <a href={getPublicUrl(t.bill_path)} target="_blank" rel="noreferrer">
                         View
                       </a>
+                    </td>
+                    <td>
+                      {t.completion_path || t.completion_remark || t.completed_at ? (
+                        <div className="cell-stack">
+                          {t.completed_at && (
+                            <span className="muted tiny">{formatDate(t.completed_at)}</span>
+                          )}
+                          {t.completion_remark && <span>{t.completion_remark}</span>}
+                          {t.completion_path ? (
+                            <a href={getPublicUrl(t.completion_path)} target="_blank" rel="noreferrer">
+                              {t.completion_name || 'View'}
+                            </a>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <span className="muted tiny">—</span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -418,15 +473,17 @@ export function UserDashboard() {
               <strong>{completeTicket.paid_by_name ?? 'Finance'}</strong>.
             </p>
             <label>
-              Remarks (optional)
+              Completion remark <span className="req">*</span>
               <textarea
+                required
                 rows={3}
                 value={completionRemark}
                 onChange={(e) => setCompletionRemark(e.target.value)}
+                placeholder="Describe what was completed…"
               />
             </label>
             <label>
-              Attachment including remarks <span className="req">*</span>
+              Completion attachment <span className="req">*</span>
               <input
                 required
                 type="file"
