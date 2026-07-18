@@ -1,13 +1,24 @@
-import { formatCurrency, getPaidTotal, getPendingAmount } from './helpers'
+import {
+  formatCurrency,
+  formatDateTime,
+  getPaidTotal,
+  getPendingAmount,
+  getPayableTarget,
+  getInvoiceRemaining,
+  priorityLabel,
+} from './helpers'
 import type { Ticket } from '../types/database'
 
 export type MailEvent =
   | 'ticket_created'
+  | 'team_head_approved'
+  | 'team_head_rejected'
   | 'ceo_approved'
   | 'ceo_rejected'
   | 'payment_made'
   | 'ticket_completed'
   | 'user_approved'
+  | 'remaining_requested'
 
 function esc(value: string | number | null | undefined): string {
   return String(value ?? '')
@@ -81,6 +92,8 @@ export function buildGreenMailTemplate(input: TemplateInput): BuiltMail {
   const user = input.userName || ticket?.profiles?.full_name || input.userEmail || 'User'
   const appUrl = appBaseUrl()
   const ctaUrl = appUrl
+  const payableTarget = ticket ? getPayableTarget(ticket) : 0
+  const pct = ticket?.payable_percent != null ? Number(ticket.payable_percent) : null
 
   const eventMeta: Record<
     MailEvent,
@@ -90,8 +103,25 @@ export function buildGreenMailTemplate(input: TemplateInput): BuiltMail {
       subject: `[${brand}] New ticket ${code} created`,
       headline: 'A new invoice ticket has been created',
       intro: `A new invoice ticket was created by <strong style="color:#1d4ed8;">${esc(user)}</strong>.`,
+      statusLabel:
+        ticket?.status === 'awaiting_team_head'
+          ? 'Awaiting Team Head Approval'
+          : 'Awaiting CEO Approval',
+      statusTone: 'warn',
+    },
+    team_head_approved: {
+      subject: `[${brand}] Ticket ${code} approved by Team Head`,
+      headline: 'Department Team Head approved the ticket',
+      intro: `The Team Head approved ticket <strong>${esc(code)}</strong>. It now needs CEO approval.`,
       statusLabel: 'Awaiting CEO Approval',
       statusTone: 'warn',
+    },
+    team_head_rejected: {
+      subject: `[${brand}] Ticket ${code} rejected by Team Head`,
+      headline: 'Ticket rejected by Department Team Head',
+      intro: `The Team Head rejected ticket <strong>${esc(code)}</strong>.`,
+      statusLabel: 'Rejected',
+      statusTone: 'bad',
     },
     ceo_approved: {
       subject: `[${brand}] Ticket ${code} approved by CEO`,
@@ -133,6 +163,16 @@ export function buildGreenMailTemplate(input: TemplateInput): BuiltMail {
       statusLabel: 'Approved',
       statusTone: 'ok',
     },
+    remaining_requested: {
+      subject: `[URGENT] [${brand}] Remaining payment requested — ${code}`,
+      headline: 'URGENT: Remaining amount requested',
+      intro: `<strong style="color:#b91c1c;">Urgent</strong> — <strong>${esc(user)}</strong> requested payment of the remaining invoice balance for ticket <strong>${esc(code)}</strong>. Approval is needed before Finance can pay.`,
+      statusLabel:
+        ticket?.status === 'awaiting_team_head'
+          ? 'URGENT — Awaiting Team Head'
+          : 'URGENT — Awaiting CEO',
+      statusTone: 'warn',
+    },
   }
 
   const meta = eventMeta[input.event]
@@ -143,13 +183,36 @@ export function buildGreenMailTemplate(input: TemplateInput): BuiltMail {
     if (ticket?.subject) {
       rows.push(detailRow('📌', 'Subject', esc(ticket.subject)))
     }
+    if (ticket?.purpose) {
+      rows.push(detailRow('🎯', 'Purpose', esc(ticket.purpose)))
+    }
     if (ticket?.amount != null) {
       rows.push(
         detailRow(
           '💰',
-          'Amount',
+          'Invoice Amount',
           `<strong style="color:#15803d;font-size:16px;">${esc(formatCurrency(Number(ticket.amount)))}</strong>`,
           { highlight: true },
+        ),
+      )
+    }
+    if (pct != null) {
+      rows.push(
+        detailRow(
+          '📊',
+          'Payable %',
+          `${esc(pct)}% → Approval / pay now: <strong>${esc(formatCurrency(payableTarget))}</strong>`,
+        ),
+      )
+    } else if (ticket && payableTarget > 0) {
+      rows.push(detailRow('📊', 'Payable now', esc(formatCurrency(payableTarget))))
+    }
+    if (ticket?.priority) {
+      rows.push(
+        detailRow(
+          '⚡',
+          'Priority',
+          `${esc(priorityLabel(ticket.priority))}${ticket.due_at ? ` · Due ${esc(formatDateTime(ticket.due_at))}` : ''}`,
         ),
       )
     }
@@ -161,8 +224,19 @@ export function buildGreenMailTemplate(input: TemplateInput): BuiltMail {
           `<strong style="color:#15803d;">${esc(formatCurrency(getPaidTotal(ticket)))}</strong>`,
         ),
       )
+      rows.push(detailRow('⏳', 'Pending (cycle)', esc(formatCurrency(getPendingAmount(ticket)))))
+    }
+    if (input.event === 'remaining_requested' && ticket) {
       rows.push(
-        detailRow('⏳', 'Pending', esc(formatCurrency(getPendingAmount(ticket)))),
+        detailRow('✅', 'Advance paid', esc(formatCurrency(getPaidTotal(ticket)))),
+      )
+      rows.push(
+        detailRow(
+          '🚨',
+          'Remaining to approve',
+          `<strong style="color:#b91c1c;">${esc(formatCurrency(getInvoiceRemaining(ticket)))}</strong>`,
+          { highlight: true },
+        ),
       )
     }
     if (ticket?.remark) {
@@ -170,6 +244,9 @@ export function buildGreenMailTemplate(input: TemplateInput): BuiltMail {
     }
     if (input.extra) {
       rows.push(detailRow('ℹ️', 'Note', esc(input.extra)))
+    }
+    if (ticket?.created_at) {
+      rows.push(detailRow('📅', 'Created', esc(formatDateTime(ticket.created_at))))
     }
     rows.push(
       detailRow('⌛', 'Status', statusBadge(meta.statusLabel, meta.statusTone), { last: true }),
@@ -191,7 +268,11 @@ export function buildGreenMailTemplate(input: TemplateInput): BuiltMail {
       ? [
           `Ticket: ${code}`,
           ticket?.subject ? `Subject: ${ticket.subject}` : '',
-          ticket?.amount != null ? `Amount: ${formatCurrency(Number(ticket.amount))}` : '',
+          ticket?.purpose ? `Purpose: ${ticket.purpose}` : '',
+          ticket?.amount != null ? `Invoice Amount: ${formatCurrency(Number(ticket.amount))}` : '',
+          pct != null ? `Payable %: ${pct}% → ${formatCurrency(payableTarget)}` : '',
+          ticket?.priority ? `Priority: ${priorityLabel(ticket.priority)}` : '',
+          ticket?.due_at ? `Due: ${formatDateTime(ticket.due_at)}` : '',
           ticket?.remark ? `Remark: ${ticket.remark}` : '',
           `Status: ${meta.statusLabel}`,
           input.extra || '',
@@ -202,6 +283,11 @@ export function buildGreenMailTemplate(input: TemplateInput): BuiltMail {
     '',
     `Open app: ${ctaUrl}`,
   ]
+
+  const headerBg =
+    input.event === 'remaining_requested'
+      ? 'background:linear-gradient(135deg,#b91c1c,#dc2626);'
+      : 'background:linear-gradient(135deg,#1f6b3a,#15803d);'
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -215,15 +301,13 @@ export function buildGreenMailTemplate(input: TemplateInput): BuiltMail {
     <tr>
       <td align="center">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #d4ead9;box-shadow:0 8px 24px rgba(26,77,46,0.08);">
-          <!-- Header -->
           <tr>
-            <td style="background:linear-gradient(135deg,#1f6b3a,#15803d);padding:28px 28px 24px;">
-              <div style="display:inline-block;background:rgba(255,255,255,0.95);color:#1f6b3a;font-size:11px;font-weight:800;letter-spacing:0.06em;padding:5px 12px;border-radius:999px;margin-bottom:14px;">FINANCE INVOICE</div>
+            <td style="${headerBg}padding:28px 28px 24px;">
+              <div style="display:inline-block;background:rgba(255,255,255,0.95);color:#1f6b3a;font-size:11px;font-weight:800;letter-spacing:0.06em;padding:5px 12px;border-radius:999px;margin-bottom:14px;">${input.event === 'remaining_requested' ? 'URGENT' : 'FINANCE INVOICE'}</div>
               <div style="font-size:24px;font-weight:800;color:#ffffff;line-height:1.25;margin:0 0 8px;">${esc(brand)}</div>
               <div style="font-size:15px;color:rgba(255,255,255,0.92);line-height:1.4;">${esc(meta.headline)}</div>
             </td>
           </tr>
-          <!-- Body -->
           <tr>
             <td style="padding:28px 28px 8px;color:#1a4d2e;font-size:15px;line-height:1.55;">
               <p style="margin:0 0 18px;">${meta.intro}</p>
@@ -235,7 +319,6 @@ export function buildGreenMailTemplate(input: TemplateInput): BuiltMail {
               </div>
             </td>
           </tr>
-          <!-- Footer -->
           <tr>
             <td style="padding:8px 28px 24px;text-align:center;font-size:12px;color:#6a8874;line-height:1.5;">
               This is an automated notification from <strong style="color:#2f5a40;">VoicEV91 Finance System</strong>.

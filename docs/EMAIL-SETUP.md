@@ -13,6 +13,7 @@ No Supabase Edge Function. No extra paid mail API required.
 | Finance pay | User + Admin + Finance + CEO |
 | Process complete | User + Admin + Finance + CEO |
 | User account approved | User + Admin |
+| Remaining amount requested (urgent) | User + Admin + CEO + Finance |
 
 - **User email** → from database `profiles.email`
 - **Admin / Finance / CEO emails** → typed manually in Admin page

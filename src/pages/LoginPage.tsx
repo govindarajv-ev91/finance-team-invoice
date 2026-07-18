@@ -2,6 +2,11 @@ import { useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { homeForRole } from '../components/ProtectedRoute'
+import {
+  isAllowedEmail,
+  REQUIRED_EMAIL_DOMAIN,
+  REQUIRED_EMAIL_MESSAGE,
+} from '../lib/emailDomain'
 import './Auth.css'
 
 export function LoginPage() {
@@ -21,6 +26,10 @@ export function LoginPage() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
+    if (!isAllowedEmail(email)) {
+      setError(REQUIRED_EMAIL_MESSAGE)
+      return
+    }
     setSubmitting(true)
     const { error: err } = await signIn(email.trim(), password)
     setSubmitting(false)
@@ -55,9 +64,10 @@ export function LoginPage() {
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@company.com"
+            placeholder={`you@${REQUIRED_EMAIL_DOMAIN}`}
             autoComplete="email"
           />
+          <span className="muted tiny">Use your @{REQUIRED_EMAIL_DOMAIN} email.</span>
         </label>
         <label>
           Password

@@ -1,11 +1,14 @@
-export type UserRole = 'user' | 'finance' | 'admin' | 'ceo'
+export type UserRole = 'user' | 'team_head' | 'finance' | 'admin' | 'ceo'
 export type TicketStatus =
+  | 'awaiting_team_head'
   | 'awaiting_ceo'
   | 'pending'
   | 'partial'
   | 'paid'
   | 'completed'
   | 'rejected'
+
+export type TicketPriority = 'high' | 'medium' | 'low'
 
 export interface Profile {
   id: string
@@ -23,6 +26,8 @@ export interface Profile {
 export interface Department {
   id: string
   name: string
+  requires_team_head_approval: boolean
+  team_head_emails: string
   created_at: string
 }
 
@@ -33,14 +38,29 @@ export interface Ticket {
   department_id: string
   subject: string
   remark: string | null
+  purpose: string | null
   amount: number
+  payable_percent: number | null
+  payable_amount: number | null
+  priority: TicketPriority
+  due_at: string | null
   invoice_number: string | null
   bank_name: string | null
   account_number: string | null
   ifsc_code: string | null
   bill_path: string
   bill_name: string
+  cheque_path: string | null
+  cheque_name: string | null
+  user_cheque_path: string | null
+  user_cheque_name: string | null
   status: TicketStatus
+  urgent: boolean
+  remaining_requested_at: string | null
+  team_head_approved_by: string | null
+  team_head_approved_by_name: string | null
+  team_head_approved_at: string | null
+  team_head_remark: string | null
   ceo_approved_by: string | null
   ceo_approved_by_name: string | null
   ceo_approved_at: string | null
@@ -52,6 +72,7 @@ export interface Ticket {
   paid_at: string | null
   last_payment_amount: number | null
   payment_history: string | null
+  approval_history: string | null
   completion_remark: string | null
   completion_path: string | null
   completion_name: string | null

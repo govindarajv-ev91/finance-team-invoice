@@ -2,6 +2,11 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
+import {
+  isAllowedEmail,
+  REQUIRED_EMAIL_DOMAIN,
+  REQUIRED_EMAIL_MESSAGE,
+} from '../lib/emailDomain'
 import type { Department } from '../types/database'
 import './Auth.css'
 
@@ -40,6 +45,10 @@ export function SignupPage() {
     e.preventDefault()
     setError(null)
     setInfo(null)
+    if (!isAllowedEmail(email)) {
+      setError(REQUIRED_EMAIL_MESSAGE)
+      return
+    }
     if (password.length < 6) {
       setError('Password must be at least 6 characters.')
       return
@@ -105,9 +114,10 @@ export function SignupPage() {
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@company.com"
+            placeholder={`you@${REQUIRED_EMAIL_DOMAIN}`}
             autoComplete="email"
           />
+          <span className="muted tiny">Only @{REQUIRED_EMAIL_DOMAIN} emails are accepted.</span>
         </label>
         <label>
           Password

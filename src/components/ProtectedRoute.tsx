@@ -12,6 +12,7 @@ interface ProtectedRouteProps {
 function homeForRole(role: UserRole, isApproved: boolean) {
   if (role === 'user' && !isApproved) return '/pending-approval'
   if (role === 'admin') return '/admin'
+  if (role === 'team_head') return '/team-head'
   if (role === 'finance') return '/finance'
   if (role === 'ceo') return '/ceo'
   return '/dashboard'

@@ -3,9 +3,25 @@ import { Layout } from '../components/Layout'
 import { Modal } from '../components/Modal'
 import { SearchBox } from '../components/SearchBox'
 import { StatusBadge } from '../components/StatusBadge'
+import {
+  StatusOverview,
+  ticketMatchesStatusFilter,
+  type StatusFilter,
+} from '../components/StatusOverview'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
-import { formatCurrency, formatDate, getPaidTotal, getPendingAmount, getPublicUrl } from '../lib/helpers'
+import {
+  daysBetween,
+  formatCurrency,
+  formatDateTime,
+  getInvoiceRemaining,
+  getPaidTotal,
+  getPayableTarget,
+  getPendingAmount,
+  getPublicUrl,
+  priorityLabel,
+  ticketDayCountLabel,
+} from '../lib/helpers'
 import { notifyTicket } from '../lib/notify'
 import { matchesSearch } from '../lib/search'
 import type { Ticket } from '../types/database'
@@ -17,7 +33,7 @@ export function CeoDashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
-  const [filter, setFilter] = useState<'awaiting_ceo' | 'pending' | 'all'>('awaiting_ceo')
+  const [filter, setFilter] = useState<StatusFilter>('awaiting_ceo')
   const [search, setSearch] = useState('')
   const [approveTicket, setApproveTicket] = useState<Ticket | null>(null)
   const [ceoRemark, setCeoRemark] = useState('')
@@ -25,19 +41,15 @@ export function CeoDashboard() {
 
   const loadTickets = useCallback(async () => {
     setLoading(true)
-    let query = supabase
+    const { data, error: err } = await supabase
       .from('tickets')
       .select('*, profiles!user_id(*), departments(*)')
       .order('created_at', { ascending: false })
-
-    if (filter !== 'all') query = query.eq('status', filter)
-
-    const { data, error: err } = await query
     if (err) setError(err.message)
     else setError(null)
     setTickets((data as Ticket[]) ?? [])
     setLoading(false)
-  }, [filter])
+  }, [])
 
   useEffect(() => {
     void loadTickets()
@@ -45,22 +57,26 @@ export function CeoDashboard() {
 
   const filteredTickets = useMemo(
     () =>
-      tickets.filter((t) =>
-        matchesSearch(
-          search,
-          t.ticket_code,
-          t.subject,
-          t.remark,
-          t.invoice_number,
-          t.bank_name,
-          t.account_number,
-          t.ifsc_code,
-          t.amount,
-          t.profiles?.full_name,
-          t.departments?.name,
+      tickets
+        .filter((t) => ticketMatchesStatusFilter(t, filter))
+        .filter((t) =>
+          matchesSearch(
+            search,
+            t.ticket_code,
+            t.subject,
+            t.purpose,
+            t.remark,
+            t.invoice_number,
+            t.bank_name,
+            t.account_number,
+            t.ifsc_code,
+            t.amount,
+            t.priority,
+            t.profiles?.full_name,
+            t.departments?.name,
+          ),
         ),
-      ),
-    [tickets, search],
+    [tickets, search, filter],
   )
 
   async function onApprove(e: FormEvent) {
@@ -68,14 +84,23 @@ export function CeoDashboard() {
     if (!approveTicket) return
     setSaving(true)
     setError(null)
+    const nowIso = new Date().toISOString()
+    const action = approveTicket.remaining_requested_at
+      ? `Approved REMAINING ${formatCurrency(getPayableTarget(approveTicket))}`
+      : `Approved advance ${formatCurrency(getPayableTarget(approveTicket))}`
+    const historyLine = `${nowIso} | ${action} | ${profile?.full_name ?? 'CEO'} | ${ceoRemark.trim() || ''}`
+    const approvalHistory = approveTicket.approval_history
+      ? `${approveTicket.approval_history}\n${historyLine}`
+      : historyLine
     const { error: err } = await supabase
       .from('tickets')
       .update({
         status: 'pending',
         ceo_approved_by: profile?.id ?? null,
         ceo_approved_by_name: profile?.full_name ?? 'CEO',
-        ceo_approved_at: new Date().toISOString(),
+        ceo_approved_at: nowIso,
         ceo_remark: ceoRemark.trim() || null,
+        approval_history: approvalHistory,
       })
       .eq('id', approveTicket.id)
 
@@ -91,6 +116,7 @@ export function CeoDashboard() {
       userEmail: approveTicket.profiles?.email,
       userName: approveTicket.profiles?.full_name,
       extra: ceoRemark.trim() || undefined,
+      dedupeSuffix: nowIso,
     })
     setApproveTicket(null)
     setCeoRemark('')
@@ -100,14 +126,20 @@ export function CeoDashboard() {
   async function onReject(ticket: Ticket) {
     const remark = window.prompt('Rejection remark (optional)') ?? ''
     setError(null)
+    const nowIso = new Date().toISOString()
+    const rejectLine = `${nowIso} | Rejected${ticket.remaining_requested_at ? ' (remaining request)' : ''} | ${profile?.full_name ?? 'CEO'} | ${remark.trim() || 'Rejected by CEO'}`
+    const approvalHistory = ticket.approval_history
+      ? `${ticket.approval_history}\n${rejectLine}`
+      : rejectLine
     const { error: err } = await supabase
       .from('tickets')
       .update({
         status: 'rejected',
         ceo_approved_by: profile?.id ?? null,
         ceo_approved_by_name: profile?.full_name ?? 'CEO',
-        ceo_approved_at: new Date().toISOString(),
+        ceo_approved_at: nowIso,
         ceo_remark: remark.trim() || 'Rejected by CEO',
+        approval_history: approvalHistory,
       })
       .eq('id', ticket.id)
     if (err) {
@@ -121,6 +153,7 @@ export function CeoDashboard() {
       userEmail: ticket.profiles?.email,
       userName: ticket.profiles?.full_name,
       extra: remark.trim() || 'Rejected by CEO',
+      dedupeSuffix: nowIso,
     })
     await loadTickets()
   }
@@ -130,25 +163,42 @@ export function CeoDashboard() {
       {(error || info) && (
         <p className={error ? 'form-error' : 'form-success'}>{error || info}</p>
       )}
+
+      <StatusOverview
+        tickets={tickets}
+        activeFilter={filter}
+        onFilter={setFilter}
+        subtitle="Click a card to filter the list. Approve tickets before Finance can pay."
+      />
+
       <div className="toolbar">
         <div className="filter-tabs">
-          {(['awaiting_ceo', 'pending', 'all'] as const).map((f) => (
+          {(
+            [
+              ['awaiting_ceo', 'Awaiting approval'],
+              ['pending', 'Approved'],
+              ['partial', 'Partial'],
+              ['paid', 'Paid'],
+              ['completed', 'Completed'],
+              ['all', 'All'],
+            ] as const
+          ).map(([f, label]) => (
             <button
               key={f}
               type="button"
               className={`chip ${filter === f ? 'active' : ''}`}
               onClick={() => setFilter(f)}
             >
-              {f === 'awaiting_ceo' ? 'Awaiting approval' : f === 'pending' ? 'Approved' : 'All'}
+              {label}
             </button>
           ))}
         </div>
-        <SearchBox value={search} onChange={setSearch} placeholder="Search ticket, invoice, bank…" />
+        <SearchBox value={search} onChange={setSearch} placeholder="Search ticket, purpose, bank…" />
       </div>
 
       <section className="card">
         <h2>Invoice tickets</h2>
-        <p className="muted">Approve tickets before Finance can pay.</p>
+        <p className="muted">Approve the payable advance (or urgent remaining) before Finance pays.</p>
         {loading ? (
           <p className="muted">Loading…</p>
         ) : filteredTickets.length === 0 ? (
@@ -160,40 +210,77 @@ export function CeoDashboard() {
                 <tr>
                   <th>Ticket</th>
                   <th>User</th>
-                  <th>Remark</th>
-                  <th>Invoice #</th>
-                  <th>Bank / Account / IFSC</th>
-                  <th>Amount</th>
+                  <th>Purpose / Remark</th>
+                  <th>Payable</th>
+                  <th>Priority</th>
+                  <th>Created / Days</th>
                   <th>Status</th>
-                  <th>Bill</th>
+                  <th>Files</th>
                   <th>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredTickets.map((t) => (
-                  <tr key={t.id}>
+                  <tr key={t.id} className={t.urgent ? 'row-urgent' : undefined}>
                     <td>
                       <code>{t.ticket_code}</code>
                       <div className="muted tiny">{t.subject}</div>
+                      {(t.urgent || t.remaining_requested_at) && (
+                        <span className="urgent-badge">URGENT</span>
+                      )}
                     </td>
                     <td>{t.profiles?.full_name ?? '—'}</td>
                     <td>
-                      <span className="muted">{t.remark ?? '—'}</span>
-                    </td>
-                    <td>{t.invoice_number ?? '—'}</td>
-                    <td>
                       <div className="cell-stack">
-                        <span>{t.bank_name ?? '—'}</span>
-                        <span className="muted tiny">{t.account_number ?? '—'}</span>
-                        <span className="muted tiny">{t.ifsc_code ?? '—'}</span>
+                        <span>{t.purpose ?? '—'}</span>
+                        <span className="muted tiny">{t.remark ?? ''}</span>
+                        {t.team_head_approved_by_name && (
+                          <span className="muted tiny">
+                            Team Head: {t.team_head_approved_by_name}
+                            {t.team_head_remark ? ` · ${t.team_head_remark}` : ''}
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td>
                       <div className="cell-stack">
-                        <strong>Total {formatCurrency(Number(t.amount))}</strong>
+                        <strong>
+                          Approve {formatCurrency(getPayableTarget(t))}
+                        </strong>
+                        <span className="muted tiny">
+                          of {formatCurrency(Number(t.amount))}
+                          {t.payable_percent != null && !t.remaining_requested_at
+                            ? ` · ${t.payable_percent}%`
+                            : t.remaining_requested_at
+                              ? ' · remaining'
+                              : ''}
+                        </span>
                         <span className="muted tiny">Paid {formatCurrency(getPaidTotal(t))}</span>
                         {getPendingAmount(t) > 0 && (
-                          <span className="pending-amt">Pending {formatCurrency(getPendingAmount(t))}</span>
+                          <span className="pending-amt">
+                            Pending {formatCurrency(getPendingAmount(t))}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td>
+                      <div className="cell-stack">
+                        <span className={`priority-badge priority-${t.priority || 'medium'}`}>
+                          {priorityLabel(t.priority)}
+                        </span>
+                        {t.due_at && (
+                          <span className="muted tiny">Due {formatDateTime(t.due_at)}</span>
+                        )}
+                      </div>
+                    </td>
+                    <td>
+                      <div className="cell-stack">
+                        <span>{formatDateTime(t.created_at)}</span>
+                        <span className="muted tiny">{ticketDayCountLabel(t)}</span>
+                        {t.status === 'awaiting_ceo' && (
+                          <span className="muted tiny">
+                            Waiting {daysBetween(t.created_at)} day(s)
+                          </span>
                         )}
                       </div>
                     </td>
@@ -201,9 +288,16 @@ export function CeoDashboard() {
                       <StatusBadge status={t.status} />
                     </td>
                     <td>
-                      <a href={getPublicUrl(t.bill_path)} target="_blank" rel="noreferrer">
-                        View
-                      </a>
+                      <div className="cell-stack">
+                        <a href={getPublicUrl(t.bill_path)} target="_blank" rel="noreferrer">
+                          Invoice
+                        </a>
+                        {t.user_cheque_path && (
+                          <a href={getPublicUrl(t.user_cheque_path)} target="_blank" rel="noreferrer">
+                            Cheque
+                          </a>
+                        )}
+                      </div>
                     </td>
                     <td>
                       {t.status === 'awaiting_ceo' ? (
@@ -224,7 +318,7 @@ export function CeoDashboard() {
                           </button>
                         </div>
                       ) : (
-                        <span className="muted tiny">{formatDate(t.ceo_approved_at)}</span>
+                        <span className="muted tiny">{formatDateTime(t.ceo_approved_at)}</span>
                       )}
                     </td>
                   </tr>
@@ -239,10 +333,37 @@ export function CeoDashboard() {
         {approveTicket && (
           <form className="stack-form" onSubmit={onApprove}>
             <p>
-              Approve ticket <strong>{approveTicket.ticket_code}</strong> (
-              {formatCurrency(Number(approveTicket.amount))}) for Finance payment?
+              Approve ticket <strong>{approveTicket.ticket_code}</strong> for Finance to pay{' '}
+              <strong>{formatCurrency(getPayableTarget(approveTicket))}</strong>
+              {approveTicket.urgent ? ' (URGENT remaining)' : ''}?
             </p>
             <div className="info-grid">
+              <div>
+                <span>Invoice amount</span>
+                <strong>{formatCurrency(Number(approveTicket.amount))}</strong>
+              </div>
+              <div>
+                <span>Paid amount</span>
+                <strong>{formatCurrency(getPaidTotal(approveTicket))}</strong>
+              </div>
+              <div>
+                <span>Remaining payable</span>
+                <strong className="pending-amt">
+                  {formatCurrency(getInvoiceRemaining(approveTicket))}
+                </strong>
+              </div>
+              <div>
+                <span>Approve for Finance</span>
+                <strong>{formatCurrency(getPayableTarget(approveTicket))}</strong>
+              </div>
+              <div>
+                <span>Purpose</span>
+                <strong>{approveTicket.purpose ?? '—'}</strong>
+              </div>
+              <div>
+                <span>Priority</span>
+                <strong>{priorityLabel(approveTicket.priority)}</strong>
+              </div>
               <div>
                 <span>Subject</span>
                 <strong>{approveTicket.subject}</strong>
@@ -250,6 +371,22 @@ export function CeoDashboard() {
               <div>
                 <span>User remark</span>
                 <strong>{approveTicket.remark ?? '—'}</strong>
+              </div>
+              {approveTicket.team_head_approved_by_name && (
+                <div>
+                  <span>Team Head approval</span>
+                  <strong>{approveTicket.team_head_approved_by_name}</strong>
+                  <span className="muted tiny">
+                    {formatDateTime(approveTicket.team_head_approved_at)}
+                    {approveTicket.team_head_remark
+                      ? ` · ${approveTicket.team_head_remark}`
+                      : ''}
+                  </span>
+                </div>
+              )}
+              <div>
+                <span>Invoice number</span>
+                <strong>{approveTicket.invoice_number ?? '—'}</strong>
               </div>
             </div>
             <label>

@@ -72,7 +72,7 @@ POST https://xnjnuonhymjblynoxmgw.supabase.co/auth/v1/logout
 apikey: <ANON_KEY>
 Authorization: Bearer <ACCESS_TOKEN>
 ```
-
+X
 ### 1.4 Get current user
 `GET /auth/v1/user`
 

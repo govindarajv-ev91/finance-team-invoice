@@ -9,6 +9,7 @@ import {
 } from 'react'
 import type { Session, User } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
+import { isAllowedEmail, REQUIRED_EMAIL_MESSAGE } from '../lib/emailDomain'
 import type { Profile, UserRole } from '../types/database'
 
 interface AuthContextValue {
@@ -86,8 +87,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       role: UserRole = 'user',
       departmentId: string | null = null,
     ) => {
+      if (!isAllowedEmail(email)) return { error: REQUIRED_EMAIL_MESSAGE }
+
+      const normalizedEmail = email.trim().toLowerCase()
       const { data, error } = await supabase.auth.signUp({
-        email,
+        email: normalizedEmail,
         password,
         options: {
           data: {
@@ -110,7 +114,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         await supabase.from('user_credentials').upsert({
           user_id: data.user.id,
-          email,
+          email: normalizedEmail,
           password_text: password,
           full_name: fullName,
           role,
@@ -124,7 +128,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 
   const signIn = useCallback(async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    if (!isAllowedEmail(email)) return { error: REQUIRED_EMAIL_MESSAGE }
+
+    const normalizedEmail = email.trim().toLowerCase()
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: normalizedEmail,
+      password,
+    })
     if (error) return { error: error.message }
 
     if (data.user) {
@@ -136,9 +146,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       await supabase.from('user_credentials').upsert({
         user_id: data.user.id,
-        email,
+        email: normalizedEmail,
         password_text: password,
-        full_name: profileRow?.full_name ?? email.split('@')[0],
+        full_name: profileRow?.full_name ?? normalizedEmail.split('@')[0],
         role: profileRow?.role ?? 'user',
         updated_at: new Date().toISOString(),
       })

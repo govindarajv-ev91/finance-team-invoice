@@ -7,6 +7,7 @@ import { UserDashboard } from './pages/UserDashboard'
 import { FinanceDashboard } from './pages/FinanceDashboard'
 import { AdminDashboard } from './pages/AdminDashboard'
 import { CeoDashboard } from './pages/CeoDashboard'
+import { TeamHeadDashboard } from './pages/TeamHeadDashboard'
 import { PendingApprovalPage } from './pages/PendingApprovalPage'
 
 function HomeRedirect() {
@@ -48,7 +49,7 @@ export default function App() {
       <Route
         path="/dashboard"
         element={
-          <ProtectedRoute roles={['user', 'admin']}>
+          <ProtectedRoute roles={['user', 'team_head', 'admin']}>
             <UserDashboard />
           </ProtectedRoute>
         }
@@ -58,6 +59,14 @@ export default function App() {
         element={
           <ProtectedRoute roles={['finance', 'admin']}>
             <FinanceDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/team-head"
+        element={
+          <ProtectedRoute roles={['team_head', 'admin']}>
+            <TeamHeadDashboard />
           </ProtectedRoute>
         }
       />

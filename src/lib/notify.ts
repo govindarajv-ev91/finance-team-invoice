@@ -51,6 +51,13 @@ function buildDedupeKey(input: NotifyInput): string {
       return `user_approved:${(input.userEmail || 'unknown').trim().toLowerCase()}`
     case 'payment_made':
       return `${code}:payment_made:${suffix || 'unknown'}`
+    case 'remaining_requested':
+      return `${code}:remaining_requested:${suffix || '1'}`
+    case 'team_head_approved':
+    case 'team_head_rejected':
+    case 'ceo_approved':
+    case 'ceo_rejected':
+      return `${code}:${input.event}:${suffix || '1'}`
     default:
       return `${code}:${input.event}`
   }
@@ -66,15 +73,30 @@ function buildMessage(input: NotifyInput): { subject: string; text: string; html
   })
 }
 
-function recipientsFor(event: MailEvent, settings: MailSettings, userEmail?: string | null): string[] {
+function recipientsFor(
+  event: MailEvent,
+  settings: MailSettings,
+  ticket?: Ticket | null,
+  userEmail?: string | null,
+): string[] {
   const admin = splitEmails(settings.admin_emails)
   const finance = splitEmails(settings.finance_emails)
   const ceo = splitEmails(settings.ceo_emails)
   const user = splitEmails(userEmail)
+  const teamHead = splitEmails(ticket?.departments?.team_head_emails)
+  // Route by the ticket's actual status: a Team Head creating their own
+  // ticket skips their queue and goes straight to the CEO.
+  const requiresTeamHead = ticket?.status === 'awaiting_team_head'
 
   switch (event) {
     case 'ticket_created':
-      return unique([...user, ...admin, ...ceo, ...finance])
+      return requiresTeamHead
+        ? unique([...user, ...admin, ...teamHead])
+        : unique([...user, ...admin, ...ceo])
+    case 'team_head_approved':
+      return unique([...user, ...admin, ...teamHead, ...ceo])
+    case 'team_head_rejected':
+      return unique([...user, ...admin, ...teamHead])
     case 'ceo_approved':
       return unique([...user, ...admin, ...finance, ...ceo])
     case 'ceo_rejected':
@@ -83,6 +105,10 @@ function recipientsFor(event: MailEvent, settings: MailSettings, userEmail?: str
       return unique([...user, ...admin, ...finance, ...ceo])
     case 'ticket_completed':
       return unique([...user, ...admin, ...finance, ...ceo])
+    case 'remaining_requested':
+      return requiresTeamHead
+        ? unique([...user, ...admin, ...teamHead])
+        : unique([...user, ...admin, ...ceo])
     case 'user_approved':
       return unique([...user, ...admin])
     default:
@@ -131,7 +157,7 @@ export async function notifyTicket(input: NotifyInput): Promise<void> {
     }
 
     const userEmail = input.userEmail || input.ticket?.profiles?.email || null
-    const to = recipientsFor(input.event, settings as MailSettings, userEmail)
+    const to = recipientsFor(input.event, settings as MailSettings, input.ticket, userEmail)
     const message = buildMessage(input)
 
     if (to.length === 0) {
