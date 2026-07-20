@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Layout } from '../components/Layout'
 import { Modal } from '../components/Modal'
 import { SearchBox } from '../components/SearchBox'
+import { DateRangeFilter } from '../components/DateRangeFilter'
 import { StatusBadge } from '../components/StatusBadge'
 import { useAuth } from '../context/AuthContext'
 import {
@@ -14,6 +15,7 @@ import {
   priorityLabel,
 } from '../lib/helpers'
 import { notifyTicket } from '../lib/notify'
+import { DEFAULT_CREATED_DATE_FILTER, matchesCreatedDateFilter } from '../lib/dateRange'
 import { matchesSearch } from '../lib/search'
 import { supabase } from '../lib/supabase'
 import type { Ticket } from '../types/database'
@@ -24,6 +26,7 @@ export function TeamHeadDashboard() {
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [createdDateFilter, setCreatedDateFilter] = useState(DEFAULT_CREATED_DATE_FILTER)
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
   const [selected, setSelected] = useState<Ticket | null>(null)
@@ -58,17 +61,19 @@ export function TeamHeadDashboard() {
     () =>
       tickets
         .filter((ticket) => ticket.status === 'awaiting_team_head')
-        .filter((ticket) =>
-          matchesSearch(
-            search,
-            ticket.ticket_code,
-            ticket.subject,
-            ticket.purpose,
-            ticket.invoice_number,
-            ticket.profiles?.full_name,
-          ),
+        .filter(
+          (ticket) =>
+            matchesCreatedDateFilter(ticket.created_at, createdDateFilter) &&
+            matchesSearch(
+              search,
+              ticket.ticket_code,
+              ticket.subject,
+              ticket.purpose,
+              ticket.invoice_number,
+              ticket.profiles?.full_name,
+            ),
         ),
-    [tickets, search],
+    [tickets, search, createdDateFilter],
   )
 
   async function approve(e: FormEvent) {
@@ -197,6 +202,7 @@ export function TeamHeadDashboard() {
         <p className="muted tiny">
           Your own invoice requests skip this queue and go directly to the CEO.
         </p>
+        <DateRangeFilter value={createdDateFilter} onChange={setCreatedDateFilter} />
 
         {loading ? (
           <p className="muted">Loading…</p>

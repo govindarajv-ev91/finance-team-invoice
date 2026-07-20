@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { Layout } from '../components/Layout'
 import { Modal } from '../components/Modal'
 import { SearchBox } from '../components/SearchBox'
+import { DateRangeFilter } from '../components/DateRangeFilter'
 import { StatusBadge } from '../components/StatusBadge'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
@@ -24,6 +25,7 @@ import {
   uploadFile,
 } from '../lib/helpers'
 import { notifyTicket } from '../lib/notify'
+import { DEFAULT_CREATED_DATE_FILTER, matchesCreatedDateFilter } from '../lib/dateRange'
 import { matchesSearch } from '../lib/search'
 import type { Department, Profile, Ticket, TicketPriority, TicketStatus } from '../types/database'
 import './Dashboard.css'
@@ -57,6 +59,7 @@ export function UserDashboard() {
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [createdDateFilter, setCreatedDateFilter] = useState(DEFAULT_CREATED_DATE_FILTER)
   const [ticketFilter, setTicketFilter] = useState<MyTicketFilter>('all')
 
   const [departmentId, setDepartmentId] = useState('')
@@ -142,26 +145,28 @@ export function UserDashboard() {
       default:
         break
     }
-    return list.filter((t) =>
-      matchesSearch(
-        search,
-        t.ticket_code,
-        t.subject,
-        t.purpose,
-        t.remark,
-        t.amount,
-        t.status,
-        t.priority,
-        t.invoice_number,
-        t.bank_name,
-        t.account_number,
-        t.ifsc_code,
-        t.departments?.name,
-        t.paid_by_name,
-        t.utr_number,
-      ),
+    return list.filter(
+      (t) =>
+        matchesCreatedDateFilter(t.created_at, createdDateFilter) &&
+        matchesSearch(
+          search,
+          t.ticket_code,
+          t.subject,
+          t.purpose,
+          t.remark,
+          t.amount,
+          t.status,
+          t.priority,
+          t.invoice_number,
+          t.bank_name,
+          t.account_number,
+          t.ifsc_code,
+          t.departments?.name,
+          t.paid_by_name,
+          t.utr_number,
+        ),
     )
-  }, [tickets, search, ticketFilter])
+  }, [tickets, search, ticketFilter, createdDateFilter])
 
   async function onCreate(e: FormEvent) {
     e.preventDefault()
@@ -611,6 +616,7 @@ export function UserDashboard() {
             placeholder="Search ticket, purpose, invoice…"
           />
         </div>
+        <DateRangeFilter value={createdDateFilter} onChange={setCreatedDateFilter} />
         <div className="filter-tabs" style={{ margin: '0.75rem 0' }}>
           {(
             [

@@ -262,6 +262,49 @@ code {
   gap: 0.15rem;
 }
 
+.date-range-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0.75rem 0;
+}
+
+.date-range-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #2f5a40;
+}
+
+.date-range-tabs {
+  margin: 0;
+}
+
+.date-range-custom {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.date-range-custom label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: #5a7a64;
+}
+
+.date-range-custom input[type='date'] {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #cfe8d7;
+  border-radius: 8px;
+  font: inherit;
+  min-width: 10rem;
+}
+
+.date-range-active {
+  display: inline-block;
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));

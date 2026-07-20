@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { Layout } from '../components/Layout'
 import { Modal } from '../components/Modal'
 import { SearchBox } from '../components/SearchBox'
+import { DateRangeFilter } from '../components/DateRangeFilter'
 import { StatusBadge } from '../components/StatusBadge'
 import {
   StatusOverview,
@@ -24,6 +25,7 @@ import {
   ticketDayCountLabel,
 } from '../lib/helpers'
 import { notifyTicket } from '../lib/notify'
+import { DEFAULT_CREATED_DATE_FILTER, matchesCreatedDateFilter } from '../lib/dateRange'
 import { matchesSearch } from '../lib/search'
 import type { Ticket } from '../types/database'
 import './Dashboard.css'
@@ -51,6 +53,7 @@ export function FinanceDashboard() {
   const [info, setInfo] = useState<string | null>(null)
   const [filter, setFilter] = useState<StatusFilter>('pending')
   const [search, setSearch] = useState('')
+  const [createdDateFilter, setCreatedDateFilter] = useState(DEFAULT_CREATED_DATE_FILTER)
 
   const [payTicket, setPayTicket] = useState<Ticket | null>(null)
   const [payerName, setPayerName] = useState('')
@@ -100,31 +103,33 @@ export function FinanceDashboard() {
       }
       return ticketMatchesStatusFilter(t, filter)
     })
-    return list.filter((t) =>
-      matchesSearch(
-        search,
-        t.ticket_code,
-        t.subject,
-        t.purpose,
-        t.remark,
-        t.ceo_remark,
-        t.amount,
-        t.status,
-        t.priority,
-        t.invoice_number,
-        t.bank_name,
-        t.account_number,
-        t.ifsc_code,
-        t.departments?.name,
-        t.profiles?.full_name,
-        t.profiles?.email,
-        t.paid_by_name,
-        t.utr_number,
-        t.bill_name,
-        t.cheque_name,
-      ),
+    return list.filter(
+      (t) =>
+        matchesCreatedDateFilter(t.created_at, createdDateFilter) &&
+        matchesSearch(
+          search,
+          t.ticket_code,
+          t.subject,
+          t.purpose,
+          t.remark,
+          t.ceo_remark,
+          t.amount,
+          t.status,
+          t.priority,
+          t.invoice_number,
+          t.bank_name,
+          t.account_number,
+          t.ifsc_code,
+          t.departments?.name,
+          t.profiles?.full_name,
+          t.profiles?.email,
+          t.paid_by_name,
+          t.utr_number,
+          t.bill_name,
+          t.cheque_name,
+        ),
     )
-  }, [tickets, search, filter])
+  }, [tickets, search, filter, createdDateFilter])
 
   async function confirmPay(e: FormEvent) {
     e.preventDefault()
@@ -264,6 +269,8 @@ export function FinanceDashboard() {
           placeholder="Search ticket, UTR, purpose…"
         />
       </div>
+
+      <DateRangeFilter value={createdDateFilter} onChange={setCreatedDateFilter} />
 
       <section className="card">
         <h2>Invoice list</h2>

@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { Layout } from '../components/Layout'
 import { Modal } from '../components/Modal'
 import { SearchBox } from '../components/SearchBox'
+import { DateRangeFilter } from '../components/DateRangeFilter'
 import { StatusBadge } from '../components/StatusBadge'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { downloadExcel } from '../lib/excel'
 import { isAllowedEmail } from '../lib/emailDomain'
+import { DEFAULT_CREATED_DATE_FILTER, matchesCreatedDateFilter } from '../lib/dateRange'
 import {
   formatCurrency,
   formatDate,
@@ -93,6 +95,7 @@ export function AdminDashboard() {
   >('all')
   const [showPasswords, setShowPasswords] = useState(false)
   const [ticketSearch, setTicketSearch] = useState('')
+  const [createdDateFilter, setCreatedDateFilter] = useState(DEFAULT_CREATED_DATE_FILTER)
   const [userSearch, setUserSearch] = useState('')
   const [deptSearch, setDeptSearch] = useState('')
   const [detailTicket, setDetailTicket] = useState<Ticket | null>(null)
@@ -209,33 +212,35 @@ export function AdminDashboard() {
 
   const filteredTickets = useMemo(() => {
     const byStatus = statusFilter === 'all' ? tickets : tickets.filter((t) => t.status === statusFilter)
-    return byStatus.filter((t) =>
-      matchesSearch(
-        ticketSearch,
-        t.ticket_code,
-        t.subject,
-        t.purpose,
-        t.remark,
-        t.ceo_remark,
-        t.ceo_approved_by_name,
-        t.completion_remark,
-        t.completion_name,
-        t.amount,
-        t.status,
-        t.priority,
-        t.departments?.name,
-        t.profiles?.full_name,
-        t.profiles?.email,
-        t.paid_by_name,
-        t.utr_number,
-        t.payment_history,
-        t.invoice_number,
-        t.cheque_name,
-        t.bank_name,
-        t.account_number,
-      ),
+    return byStatus.filter(
+      (t) =>
+        matchesCreatedDateFilter(t.created_at, createdDateFilter) &&
+        matchesSearch(
+          ticketSearch,
+          t.ticket_code,
+          t.subject,
+          t.purpose,
+          t.remark,
+          t.ceo_remark,
+          t.ceo_approved_by_name,
+          t.completion_remark,
+          t.completion_name,
+          t.amount,
+          t.status,
+          t.priority,
+          t.departments?.name,
+          t.profiles?.full_name,
+          t.profiles?.email,
+          t.paid_by_name,
+          t.utr_number,
+          t.payment_history,
+          t.invoice_number,
+          t.cheque_name,
+          t.bank_name,
+          t.account_number,
+        ),
     )
-  }, [tickets, statusFilter, ticketSearch])
+  }, [tickets, statusFilter, ticketSearch, createdDateFilter])
 
   const filteredUsers = useMemo(
     () =>
@@ -517,7 +522,9 @@ export function AdminDashboard() {
       | 'completed'
       | 'rejected' = 'all',
   ) {
-    const list = status === 'all' ? tickets : tickets.filter((t) => t.status === status)
+    const list = (status === 'all' ? tickets : tickets.filter((t) => t.status === status)).filter(
+      (t) => matchesCreatedDateFilter(t.created_at, createdDateFilter),
+    )
     const rows = list.map((t) => ({
       Ticket: t.ticket_code,
       User: t.profiles?.full_name ?? '',
@@ -732,6 +739,7 @@ export function AdminDashboard() {
               </button>
             </div>
           </div>
+          <DateRangeFilter value={createdDateFilter} onChange={setCreatedDateFilter} />
           <div className="filter-tabs" style={{ margin: '1rem 0' }}>
             {(
               [
