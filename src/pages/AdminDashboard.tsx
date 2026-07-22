@@ -104,6 +104,8 @@ export function AdminDashboard() {
   const [financeEmails, setFinanceEmails] = useState('')
   const [ceoEmails, setCeoEmails] = useState('')
   const [mailWebhookUrl, setMailWebhookUrl] = useState('')
+  const [completionReminderDays, setCompletionReminderDays] = useState('3')
+  const [completionReminderEnabled, setCompletionReminderEnabled] = useState(true)
   const [savingEmails, setSavingEmails] = useState(false)
   const [mailLogs, setMailLogs] = useState<MailLog[]>([])
   const [mailLogSearch, setMailLogSearch] = useState('')
@@ -150,6 +152,8 @@ export function AdminDashboard() {
       setFinanceEmails(s.data.finance_emails ?? '')
       setCeoEmails(s.data.ceo_emails ?? '')
       setMailWebhookUrl(s.data.mail_webhook_url ?? '')
+      setCompletionReminderDays(String(s.data.completion_reminder_days ?? 3))
+      setCompletionReminderEnabled(s.data.completion_reminder_enabled !== false)
     }
   }, [])
 
@@ -391,12 +395,19 @@ export function AdminDashboard() {
     e.preventDefault()
     clearMessages()
     setSavingEmails(true)
+    const reminderDays = Number(completionReminderDays)
+    if (!Number.isFinite(reminderDays) || reminderDays < 1 || reminderDays > 30) {
+      setError('Completion reminder days must be between 1 and 30.')
+      return
+    }
     const { error: err } = await supabase.from('notification_settings').upsert({
       id: 1,
       admin_emails: adminEmails.trim(),
       finance_emails: financeEmails.trim(),
       ceo_emails: ceoEmails.trim(),
       mail_webhook_url: mailWebhookUrl.trim(),
+      completion_reminder_days: Math.round(reminderDays),
+      completion_reminder_enabled: completionReminderEnabled,
       updated_at: new Date().toISOString(),
     })
     setSavingEmails(false)
@@ -1639,6 +1650,36 @@ export function AdminDashboard() {
                 Setup: copy code from google-apps-script/VoicEV91-Mail.gs → script.google.com → Deploy as
                 Web app → paste URL here. Full steps in docs/EMAIL-SETUP.md.
               </p>
+              <hr style={{ border: 'none', borderTop: '1px solid #e4f0e8', margin: '0.5rem 0' }} />
+              <h3 style={{ margin: '0.25rem 0' }}>Completion reminder (auto mail)</h3>
+              <p className="muted tiny">
+                When a ticket is <strong>Paid — Awaiting Complete</strong> and the user does not click Process
+                Complete, a daily reminder email is sent after the number of days below. Requires Google Apps
+                Script daily trigger — see docs/EMAIL-SETUP.md.
+              </p>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={completionReminderEnabled}
+                  onChange={(e) => setCompletionReminderEnabled(e.target.checked)}
+                />
+                <span>
+                  <strong>Enable completion reminders</strong>
+                  <span className="muted tiny block">Turn off to stop auto mails without removing the trigger.</span>
+                </span>
+              </label>
+              <label>
+                Remind after (days)
+                <input
+                  type="number"
+                  min={1}
+                  max={30}
+                  step={1}
+                  value={completionReminderDays}
+                  onChange={(e) => setCompletionReminderDays(e.target.value)}
+                />
+                <span className="muted tiny">Default 3 — e.g. ticket LXDNS019 paid 3+ days ago still open.</span>
+              </label>
               <button type="submit" className="btn btn-primary" disabled={savingEmails}>
                 {savingEmails ? 'Saving…' : 'Save email settings'}
               </button>

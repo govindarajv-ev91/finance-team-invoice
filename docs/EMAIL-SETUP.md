@@ -14,6 +14,7 @@ No Supabase Edge Function. No extra paid mail API required.
 | Process complete | User + Admin + Finance + CEO |
 | User account approved | User + Admin |
 | Remaining amount requested (urgent) | User + Admin + CEO + Finance |
+| Completion reminder (paid, not completed 3+ days) | User + Admin |
 
 - **User email** → from database `profiles.email`
 - **Admin / Finance / CEO emails** → typed manually in Admin page
@@ -26,6 +27,7 @@ Run in Supabase SQL Editor (both):
 
 1. `supabase/patch-email-notifications.sql`
 2. `supabase/patch-mail-logs-dedupe.sql` ← **required** (one ticket + one event = one mail_log)
+3. `supabase/patch-completion-reminder.sql` ← **required** for auto completion reminders
 
 Example: ticket `AWPBU003` created → only one row with key `AWPBU003:ticket_created`.
 Later CEO approve → second row `AWPBU003:ceo_approved` (new event, allowed).
@@ -51,6 +53,22 @@ Track all sends in Admin → **Email alerts** → **Mail log tracker**.
 Quick test: open the Web app URL in a browser. You should see  
 `{"ok":true,"service":"VoicEV91 mail webhook"}`  
 If not, redeploy with access **Anyone**.
+
+### Completion reminder (daily auto mail)
+
+When Finance has fully paid a ticket but the user has **not** clicked **Process Complete** for **3 days** (configurable in Admin), the user gets a reminder email. Repeats once per day until the ticket is completed.
+
+1. At the **top** of `VoicEV91-Mail.gs`, paste your **service_role SECRET** key into `VOICEV91_SERVICE_ROLE_KEY`
+   - **NOT** the value from `.env` (`VITE_SUPABASE_ANON_KEY` / `sb_publishable_...`) — that is the wrong key
+   - Open: https://supabase.com/dashboard/project/xnjnuonhymjblynoxmgw/settings/api
+   - Copy **service_role** → **Reveal** (starts with `eyJ...` or `sb_secret_...`)
+2. **Save** → Run **once**: `configureSupabaseOnce()`
+   - If stuck, run `showWhichSupabaseKeyToUse()` and read the Execution log
+3. Run **once**: `installDailyCompletionReminderTrigger()` (runs daily ~9 AM)
+4. Test: run `showSupabaseConfigStatus()` then `testCompletionReminders()` — check **Execution log**
+4. Admin → **Email alerts** → set **Remind after (days)** (default 3) → Save
+
+Tickets like `LXDNS019` in status **Paid — Awaiting Complete** are included. Tracked in **Mail log tracker** as `completion_reminder`.
 
 ---
 

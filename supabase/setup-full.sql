@@ -202,6 +202,8 @@ create table if not exists public.notification_settings (
   ceo_emails text not null default '',
   from_name text not null default 'VoicEV91 Finance',
   mail_webhook_url text not null default '',
+  completion_reminder_days int not null default 3,
+  completion_reminder_enabled boolean not null default true,
   updated_at timestamptz not null default now()
 );
 

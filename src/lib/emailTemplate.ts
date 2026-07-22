@@ -19,6 +19,7 @@ export type MailEvent =
   | 'ticket_completed'
   | 'user_approved'
   | 'remaining_requested'
+  | 'completion_reminder'
 
 function esc(value: string | number | null | undefined): string {
   return String(value ?? '')
@@ -173,6 +174,13 @@ export function buildGreenMailTemplate(input: TemplateInput): BuiltMail {
           : 'URGENT — Awaiting CEO',
       statusTone: 'warn',
     },
+    completion_reminder: {
+      subject: `[${brand}] Reminder — complete ticket ${code}`,
+      headline: 'Reminder: mark ticket as Process Complete',
+      intro: `Ticket <strong>${esc(code)}</strong> has been <strong>fully paid</strong> but is still open. Please log in and click <strong>Process Complete</strong> to close it.`,
+      statusLabel: 'Paid — Awaiting Complete',
+      statusTone: 'warn',
+    },
   }
 
   const meta = eventMeta[input.event]
@@ -239,6 +247,26 @@ export function buildGreenMailTemplate(input: TemplateInput): BuiltMail {
         ),
       )
     }
+    if (input.event === 'completion_reminder' && ticket) {
+      rows.push(
+        detailRow(
+          '✅',
+          'Paid amount',
+          `<strong style="color:#15803d;">${esc(formatCurrency(getPaidTotal(ticket)))}</strong>`,
+        ),
+      )
+      if (ticket.paid_at) {
+        rows.push(detailRow('📅', 'Paid on', esc(formatDateTime(ticket.paid_at))))
+      }
+      rows.push(
+        detailRow(
+          '👉',
+          'Action needed',
+          'Open the app → <strong>My tickets</strong> → click <strong>Process Complete</strong> and upload completion proof.',
+          { highlight: true },
+        ),
+      )
+    }
     if (ticket?.remark) {
       rows.push(detailRow('📝', 'Remark', esc(ticket.remark)))
     }
@@ -287,7 +315,9 @@ export function buildGreenMailTemplate(input: TemplateInput): BuiltMail {
   const headerBg =
     input.event === 'remaining_requested'
       ? 'background:linear-gradient(135deg,#b91c1c,#dc2626);'
-      : 'background:linear-gradient(135deg,#1f6b3a,#15803d);'
+      : input.event === 'completion_reminder'
+        ? 'background:linear-gradient(135deg,#b45309,#d97706);'
+        : 'background:linear-gradient(135deg,#1f6b3a,#15803d);'
 
   const html = `<!DOCTYPE html>
 <html lang="en">

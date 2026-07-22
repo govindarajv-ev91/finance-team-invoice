@@ -53,6 +53,8 @@ function buildDedupeKey(input: NotifyInput): string {
       return `${code}:payment_made:${suffix || 'unknown'}`
     case 'remaining_requested':
       return `${code}:remaining_requested:${suffix || '1'}`
+    case 'completion_reminder':
+      return `${code}:completion_reminder:${suffix || '1'}`
     case 'team_head_approved':
     case 'team_head_rejected':
     case 'ceo_approved':
@@ -109,6 +111,8 @@ function recipientsFor(
       return requiresTeamHead
         ? unique([...user, ...admin, ...teamHead])
         : unique([...user, ...admin, ...ceo])
+    case 'completion_reminder':
+      return unique([...user, ...admin])
     case 'user_approved':
       return unique([...user, ...admin])
     default:

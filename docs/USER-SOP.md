@@ -235,6 +235,8 @@ When **all payment is done** and your work/process is finished:
 
 Status changes to **Completed**. The ticket is closed.
 
+**Auto reminder:** If a ticket stays **Paid — Awaiting Complete** for **3 days** (or more) without you closing it, you will receive a **daily reminder email** until you complete the process.
+
 ---
 
 ## 10. Using “My tickets” (tracking)
