@@ -159,7 +159,11 @@ alter table public.tickets
 alter table public.tickets drop constraint if exists tickets_payable_percent_check;
 alter table public.tickets
   add constraint tickets_payable_percent_check
-  check (payable_percent is null or (payable_percent >= 20 and payable_percent <= 60));
+  check (
+    payable_percent is null
+    or (payable_percent >= 20 and payable_percent <= 60)
+    or payable_percent = 100
+  );
 
 update public.tickets set due_at = created_at + interval '48 hours' where due_at is null;
 update public.tickets set payable_amount = amount where payable_amount is null;

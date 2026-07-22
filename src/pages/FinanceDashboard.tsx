@@ -14,6 +14,7 @@ import { supabase } from '../lib/supabase'
 import {
   formatCurrency,
   formatDateTime,
+  FULL_PAYABLE_PERCENT,
   getErrorMessage,
   getInvoiceRemaining,
   getPaidTotal,
@@ -348,8 +349,10 @@ export function FinanceDashboard() {
                           <span className="muted tiny">
                             Payable {formatCurrency(target)}
                             {t.payable_percent != null && !t.remaining_requested_at
-                              ? ` (${t.payable_percent}%)`
-                              : ''}
+                            ? t.payable_percent === FULL_PAYABLE_PERCENT
+                              ? ' (Full)'
+                              : ` (${t.payable_percent}%)`
+                            : ''}
                           </span>
                           <span className="muted tiny">Paid {formatCurrency(paid)}</span>
                           {pendingAmt > 0 ? (

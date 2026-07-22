@@ -138,6 +138,15 @@ export function computeDueAt(createdIso: string, priority: TicketPriority): stri
   return new Date(created.getTime() + ms).toISOString()
 }
 
+export const FULL_PAYABLE_PERCENT = 100
+
+/** Valid payable % at ticket creation: advance 20–60, or full invoice at 100. */
+export function isValidPayablePercent(percent: number): boolean {
+  if (!percent || percent <= 0) return false
+  if (percent === FULL_PAYABLE_PERCENT) return true
+  return percent >= 20 && percent <= 60
+}
+
 export function computePayableAmount(invoiceAmount: number, percent: number): number {
   return Math.round(invoiceAmount * (percent / 100) * 100) / 100
 }

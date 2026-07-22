@@ -28,6 +28,7 @@ alter table public.tickets
   check (
     payable_percent is null
     or (payable_percent >= 20 and payable_percent <= 60)
+    or payable_percent = 100
   );
 
 -- Backfill due_at for existing rows (medium = +48h from created_at)

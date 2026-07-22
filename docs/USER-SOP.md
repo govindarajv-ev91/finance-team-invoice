@@ -90,7 +90,9 @@ Fill **every mandatory field** before clicking **Save ticket**.
 | **Invoice number** | Number from the vendor invoice | Must match your uploaded invoice |
 | **Invoice Amount (₹)** | Full invoice total | Not the advance only — full bill amount |
 
-### 5.2 Payable % (advance)
+### 5.2 Payable % (advance) or full amount
+
+**Option A — Advance (partial) payment**
 
 | Field | Rule |
 |-------|------|
@@ -98,6 +100,14 @@ Fill **every mandatory field** before clicking **Save ticket**.
 
 **What this means:**  
 If invoice is **₹1,00,000** and you enter **50%**, approvers see **₹50,000** as the amount to approve/pay **now** (advance). The rest can be paid later through **Pay remaining amount** (see Section 8).
+
+**Option B — Full invoice payment**
+
+Tick the checkbox:
+
+**Pay full invoice amount (100%)**
+
+Use this when the **entire invoice** must be paid in one go (not an advance). The payable % field is hidden and the full invoice amount goes for approval.
 
 The form shows a preview: *“Approval / pay now: ₹…”*
 

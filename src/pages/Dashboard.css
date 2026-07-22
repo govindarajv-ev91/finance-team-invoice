@@ -41,6 +41,31 @@
   grid-column: 1 / -1;
 }
 
+.checkbox-row {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0.6rem;
+  grid-column: 1 / -1;
+  padding: 0.65rem 0.75rem;
+  background: #f4fbf6;
+  border: 1px solid #d4ead9;
+  border-radius: 10px;
+}
+
+.checkbox-row input[type='checkbox'] {
+  margin-top: 0.2rem;
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+}
+
+.checkbox-row .block {
+  display: block;
+  margin-top: 0.15rem;
+  font-weight: 400;
+}
+
 .form-grid label,
 .stack-form label {
   display: flex;

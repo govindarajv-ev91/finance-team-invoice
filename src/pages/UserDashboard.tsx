@@ -12,6 +12,7 @@ import {
   computePayableAmount,
   formatCurrency,
   formatDateTime,
+  FULL_PAYABLE_PERCENT,
   generateTicketCode,
   getErrorMessage,
   getInvoiceRemaining,
@@ -20,6 +21,7 @@ import {
   getPendingAmount,
   getPublicUrl,
   isInvoiceFullyPaid,
+  isValidPayablePercent,
   priorityLabel,
   ticketDayCountLabel,
   uploadFile,
@@ -68,6 +70,7 @@ export function UserDashboard() {
   const [remark, setRemark] = useState('')
   const [amount, setAmount] = useState('')
   const [payablePercent, setPayablePercent] = useState('50')
+  const [payFullAmount, setPayFullAmount] = useState(false)
   const [priority, setPriority] = useState<TicketPriority>('medium')
   const [invoiceNumber, setInvoiceNumber] = useState('')
   const [bankName, setBankName] = useState('')
@@ -109,9 +112,9 @@ export function UserDashboard() {
   }, [loadData])
 
   const invoiceAmt = Number(amount) || 0
-  const pctNum = Number(payablePercent)
+  const pctNum = payFullAmount ? FULL_PAYABLE_PERCENT : Number(payablePercent)
   const approvalPreview =
-    invoiceAmt > 0 && pctNum >= 20 && pctNum <= 60
+    invoiceAmt > 0 && isValidPayablePercent(pctNum)
       ? computePayableAmount(invoiceAmt, pctNum)
       : null
 
@@ -185,9 +188,13 @@ export function UserDashboard() {
       setError('Enter a valid invoice amount.')
       return
     }
-    const percent = Number(payablePercent)
-    if (!percent || percent < 20 || percent > 60) {
-      setError('Payable % must be between 20 and 60.')
+    const percent = payFullAmount ? FULL_PAYABLE_PERCENT : Number(payablePercent)
+    if (!isValidPayablePercent(percent)) {
+      setError(
+        payFullAmount
+          ? 'Could not calculate full invoice amount.'
+          : 'Payable % must be between 20 and 60, or select Pay full invoice amount.',
+      )
       return
     }
     if (!purpose.trim()) {
@@ -275,6 +282,7 @@ export function UserDashboard() {
       setRemark('')
       setAmount('')
       setPayablePercent('50')
+      setPayFullAmount(false)
       setPriority('medium')
       setInvoiceNumber('')
       setBankName('')
@@ -459,8 +467,8 @@ export function UserDashboard() {
       <section className="card">
         <h2>New invoice request</h2>
         <p className="muted">
-          After save, the ticket goes to <strong>CEO approval</strong> for the payable advance amount
-          (20%–60%). Finance pays only after CEO approves.
+          Choose <strong>advance % (20–60)</strong> or tick <strong>Pay full invoice amount</strong> when
+          the entire bill must be paid in one go. Finance pays only after approvals.
         </p>
         <form className="form-grid" onSubmit={onCreate}>
           <label>
@@ -524,23 +532,53 @@ export function UserDashboard() {
               placeholder="0.00"
             />
           </label>
-          <label>
-            Payable % (20–60) <span className="req">*</span>
+          <label className="checkbox-row">
             <input
-              required
-              type="number"
-              min={20}
-              max={60}
-              step="1"
-              value={payablePercent}
-              onChange={(e) => setPayablePercent(e.target.value)}
+              type="checkbox"
+              checked={payFullAmount}
+              onChange={(e) => setPayFullAmount(e.target.checked)}
             />
-            <span className="muted tiny">
-              {approvalPreview != null
-                ? `Approval / pay now: ${formatCurrency(approvalPreview)} of ${formatCurrency(invoiceAmt)}`
-                : 'Enter invoice amount and % between 20 and 60'}
+            <span>
+              <strong>Pay full invoice amount (100%)</strong>
+              <span className="muted tiny block">
+                Use when the entire invoice must be paid now — not a partial advance.
+              </span>
             </span>
           </label>
+          {!payFullAmount ? (
+            <label>
+              Payable % (20–60) <span className="req">*</span>
+              <input
+                required
+                type="number"
+                min={20}
+                max={60}
+                step="1"
+                value={payablePercent}
+                onChange={(e) => setPayablePercent(e.target.value)}
+              />
+              <span className="muted tiny">
+                {approvalPreview != null
+                  ? `Approval / pay now: ${formatCurrency(approvalPreview)} of ${formatCurrency(invoiceAmt)}`
+                  : 'Enter invoice amount and % between 20 and 60'}
+              </span>
+            </label>
+          ) : (
+            <label>
+              Payable amount
+              <input
+                readOnly
+                value={
+                  approvalPreview != null
+                    ? `${formatCurrency(approvalPreview)} (100% of invoice)`
+                    : 'Enter invoice amount above'
+                }
+              />
+              <span className="muted tiny">
+                CEO will approve the full invoice amount in one payment cycle.
+              </span>
+            </label>
+          )}
           <label>
             Priority <span className="req">*</span>
             <select
@@ -679,7 +717,11 @@ export function UserDashboard() {
                         <strong>Invoice {formatCurrency(Number(t.amount))}</strong>
                         <span className="muted tiny">
                           Payable {formatCurrency(getPayableTarget(t))}
-                          {t.payable_percent != null ? ` (${t.payable_percent}%)` : ''}
+                          {t.payable_percent != null
+                            ? t.payable_percent === FULL_PAYABLE_PERCENT
+                              ? ' (Full)'
+                              : ` (${t.payable_percent}%)`
+                            : ''}
                         </span>
                         <span className="muted tiny">Paid {formatCurrency(getPaidTotal(t))}</span>
                         {getPendingAmount(t) > 0 && (
