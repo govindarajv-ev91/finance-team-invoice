@@ -65,6 +65,7 @@ export function FinanceDashboard() {
 
   const loadTickets = useCallback(async () => {
     setLoading(true)
+    setError(null)
     const { data, error: err } = await supabase
       .from('tickets')
       .select('*, profiles!user_id(*), departments(*)')
@@ -229,7 +230,19 @@ export function FinanceDashboard() {
   }
 
   return (
-    <Layout title="Finance team — Invoice review">
+    <Layout
+      title="Finance team — Invoice review"
+      actions={
+        <button
+          type="button"
+          className="btn btn-ghost"
+          disabled={loading}
+          onClick={() => void loadTickets()}
+        >
+          {loading ? 'Reloading…' : 'Reload'}
+        </button>
+      }
+    >
       {(error || info) && (
         <p className={error ? 'form-error' : 'form-success'}>{error || info}</p>
       )}

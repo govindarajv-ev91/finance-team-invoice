@@ -90,11 +90,27 @@
   min-width: 0;
 }
 
+.page-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+
 .page-title {
-  margin: 0 0 1.25rem;
+  margin: 0;
   font-family: 'Fraunces', Georgia, serif;
   font-size: 1.75rem;
   color: #1a4d2e;
+}
+
+.page-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
 }
 
 @media (max-width: 900px) {

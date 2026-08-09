@@ -13,6 +13,7 @@ import {
   getPayableTarget,
   getPublicUrl,
   priorityLabel,
+  statusLabel,
 } from '../lib/helpers'
 import { notifyTicket } from '../lib/notify'
 import { DEFAULT_CREATED_DATE_FILTER, matchesCreatedDateFilter } from '../lib/dateRange'
@@ -21,8 +22,11 @@ import { supabase } from '../lib/supabase'
 import type { Ticket } from '../types/database'
 import './Dashboard.css'
 
+type TeamHeadTab = 'pending' | 'history'
+
 export function TeamHeadDashboard() {
   const { profile } = useAuth()
+  const [tab, setTab] = useState<TeamHeadTab>('pending')
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -74,6 +78,43 @@ export function TeamHeadDashboard() {
             ),
         ),
     [tickets, search, createdDateFilter],
+  )
+
+  /** Tickets this department Team Head already reviewed (approve or reject) — read-only history. */
+  const approvalHistory = useMemo(
+    () =>
+      tickets
+        .filter((ticket) => !!ticket.team_head_approved_at)
+        .filter(
+          (ticket) =>
+            matchesCreatedDateFilter(ticket.created_at, createdDateFilter) &&
+            matchesSearch(
+              search,
+              ticket.ticket_code,
+              ticket.subject,
+              ticket.purpose,
+              ticket.invoice_number,
+              ticket.profiles?.full_name,
+              ticket.team_head_remark,
+              ticket.status,
+            ),
+        )
+        .sort((a, b) => {
+          const aAt = a.team_head_approved_at ? new Date(a.team_head_approved_at).getTime() : 0
+          const bAt = b.team_head_approved_at ? new Date(b.team_head_approved_at).getTime() : 0
+          return bAt - aAt
+        }),
+    [tickets, search, createdDateFilter],
+  )
+
+  const pendingCount = useMemo(
+    () => tickets.filter((t) => t.status === 'awaiting_team_head').length,
+    [tickets],
+  )
+
+  const historyCount = useMemo(
+    () => tickets.filter((t) => !!t.team_head_approved_at).length,
+    [tickets],
   )
 
   async function approve(e: FormEvent) {
@@ -175,116 +216,225 @@ export function TeamHeadDashboard() {
     await loadTickets()
   }
 
+  const sidebar = (
+    <nav className="admin-nav" aria-label="Team Head sections">
+      <p className="admin-nav-title">Team Head menu</p>
+      <button
+        type="button"
+        className={`admin-nav-item ${tab === 'pending' ? 'active' : ''}`}
+        onClick={() => setTab('pending')}
+      >
+        <span className="admin-nav-label">Pending approvals</span>
+        <span className="admin-nav-hint">
+          Waiting for you · {pendingCount}
+        </span>
+      </button>
+      <button
+        type="button"
+        className={`admin-nav-item ${tab === 'history' ? 'active' : ''}`}
+        onClick={() => setTab('history')}
+      >
+        <span className="admin-nav-label">Team Head Approve History</span>
+        <span className="admin-nav-hint">
+          Read-only past decisions · {historyCount}
+        </span>
+      </button>
+      <Link to="/dashboard" className="admin-nav-item" style={{ textDecoration: 'none' }}>
+        <span className="admin-nav-label">New invoice request</span>
+        <span className="admin-nav-hint">Create your own ticket</span>
+      </Link>
+    </nav>
+  )
+
   return (
-    <Layout title="Team Head — Department approvals">
+    <Layout title="Team Head — Department approvals" sidebar={sidebar}>
       {error && <p className="form-error">{error}</p>}
       {info && <p className="form-success">{info}</p>}
 
-      <section className="card">
-        <div className="toolbar">
-          <div>
-            <h2 style={{ margin: 0 }}>{profile?.departments?.name ?? 'Department'} approvals</h2>
-            <p className="muted" style={{ marginBottom: 0 }}>
-              Approve department invoices before they go to the CEO.
-            </p>
-          </div>
-          <div className="btn-row">
+      {tab === 'pending' && (
+        <section className="card">
+          <div className="toolbar">
+            <div>
+              <h2 style={{ margin: 0 }}>{profile?.departments?.name ?? 'Department'} approvals</h2>
+              <p className="muted" style={{ marginBottom: 0 }}>
+                Approve department invoices before they go to the CEO.
+              </p>
+            </div>
             <SearchBox
               value={search}
               onChange={setSearch}
               placeholder="Search ticket, user, purpose…"
             />
-            <Link to="/dashboard" className="btn btn-primary btn-sm">
-              New invoice request
-            </Link>
           </div>
-        </div>
-        <p className="muted tiny">
-          Your own invoice requests skip this queue and go directly to the CEO.
-        </p>
-        <DateRangeFilter value={createdDateFilter} onChange={setCreatedDateFilter} />
-
-        {loading ? (
-          <p className="muted">Loading…</p>
-        ) : !profile?.department_id ? (
-          <p className="form-error">
-            Your Team Head account has no department. Ask Admin to assign one.
+          <p className="muted tiny">
+            Your own invoice requests skip this queue and go directly to the CEO.
           </p>
-        ) : filtered.length === 0 ? (
-          <p className="empty-hint">No tickets are waiting for your approval.</p>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Ticket / User</th>
-                  <th>Purpose</th>
-                  <th>Amount</th>
-                  <th>Priority</th>
-                  <th>Created</th>
-                  <th>Files</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((ticket) => (
-                  <tr key={ticket.id} className={ticket.urgent ? 'row-urgent' : undefined}>
-                    <td>
-                      <code>{ticket.ticket_code}</code>
-                      <div className="muted tiny">{ticket.profiles?.full_name ?? '—'}</div>
-                      <div className="muted tiny">{ticket.profiles?.email}</div>
-                      {ticket.urgent && <span className="urgent-badge">URGENT</span>}
-                    </td>
-                    <td>
-                      <div className="cell-stack">
-                        <strong>{ticket.purpose ?? '—'}</strong>
-                        <span className="muted tiny">{ticket.subject}</span>
-                        <span className="muted tiny">{ticket.remark}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="cell-stack">
-                        <strong>Invoice {formatCurrency(Number(ticket.amount))}</strong>
-                        <span className="pending-amt">
-                          Approve {formatCurrency(getPayableTarget(ticket))}
-                        </span>
-                        <span className="muted tiny">
-                          Paid {formatCurrency(getPaidTotal(ticket))}
-                        </span>
-                      </div>
-                    </td>
-                    <td>{priorityLabel(ticket.priority)}</td>
-                    <td>{formatDateTime(ticket.created_at)}</td>
-                    <td>
-                      <a href={getPublicUrl(ticket.bill_path)} target="_blank" rel="noreferrer">
-                        Invoice
-                      </a>
-                    </td>
-                    <td>
-                      <div className="btn-row">
-                        <button
-                          type="button"
-                          className="btn btn-primary btn-sm"
-                          onClick={() => setSelected(ticket)}
-                        >
-                          Review
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-danger btn-sm"
-                          onClick={() => void reject(ticket)}
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    </td>
+          <DateRangeFilter value={createdDateFilter} onChange={setCreatedDateFilter} />
+
+          {loading ? (
+            <p className="muted">Loading…</p>
+          ) : !profile?.department_id ? (
+            <p className="form-error">
+              Your Team Head account has no department. Ask Admin to assign one.
+            </p>
+          ) : filtered.length === 0 ? (
+            <p className="empty-hint">No tickets are waiting for your approval.</p>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Ticket / User</th>
+                    <th>Purpose</th>
+                    <th>Amount</th>
+                    <th>Priority</th>
+                    <th>Created</th>
+                    <th>Files</th>
+                    <th>Action</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {filtered.map((ticket) => (
+                    <tr key={ticket.id} className={ticket.urgent ? 'row-urgent' : undefined}>
+                      <td>
+                        <code>{ticket.ticket_code}</code>
+                        <div className="muted tiny">{ticket.profiles?.full_name ?? '—'}</div>
+                        <div className="muted tiny">{ticket.profiles?.email}</div>
+                        {ticket.urgent && <span className="urgent-badge">URGENT</span>}
+                      </td>
+                      <td>
+                        <div className="cell-stack">
+                          <strong>{ticket.purpose ?? '—'}</strong>
+                          <span className="muted tiny">{ticket.subject}</span>
+                          <span className="muted tiny">{ticket.remark}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <div className="cell-stack">
+                          <strong>Invoice {formatCurrency(Number(ticket.amount))}</strong>
+                          <span className="pending-amt">
+                            Approve {formatCurrency(getPayableTarget(ticket))}
+                          </span>
+                          <span className="muted tiny">
+                            Paid {formatCurrency(getPaidTotal(ticket))}
+                          </span>
+                        </div>
+                      </td>
+                      <td>{priorityLabel(ticket.priority)}</td>
+                      <td>{formatDateTime(ticket.created_at)}</td>
+                      <td>
+                        <a href={getPublicUrl(ticket.bill_path)} target="_blank" rel="noreferrer">
+                          Invoice
+                        </a>
+                      </td>
+                      <td>
+                        <div className="btn-row">
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            onClick={() => setSelected(ticket)}
+                          >
+                            Review
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-sm"
+                            onClick={() => void reject(ticket)}
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+
+      {tab === 'history' && (
+        <section className="card">
+          <div className="toolbar">
+            <div>
+              <h2 style={{ margin: 0 }}>Team Head Approve History</h2>
+              <p className="muted" style={{ marginBottom: 0 }}>
+                Read-only list of tickets already approved or rejected for this department.
+              </p>
+            </div>
+            <SearchBox
+              value={search}
+              onChange={setSearch}
+              placeholder="Search history…"
+            />
           </div>
-        )}
-      </section>
+          <DateRangeFilter value={createdDateFilter} onChange={setCreatedDateFilter} />
+
+          {loading ? (
+            <p className="muted">Loading…</p>
+          ) : approvalHistory.length === 0 ? (
+            <p className="empty-hint">No approval history yet.</p>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Ticket / User</th>
+                    <th>Decision</th>
+                    <th>When</th>
+                    <th>Amount</th>
+                    <th>Remark</th>
+                    <th>Current status</th>
+                    <th>Files</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {approvalHistory.map((ticket) => {
+                    const wasRejected = /Team Head rejected/i.test(ticket.approval_history ?? '')
+                    return (
+                      <tr key={`hist-${ticket.id}`}>
+                        <td>
+                          <code>{ticket.ticket_code}</code>
+                          <div className="muted tiny">{ticket.profiles?.full_name ?? '—'}</div>
+                          <div className="muted tiny">{ticket.purpose ?? ticket.subject}</div>
+                        </td>
+                        <td>
+                          <strong>{wasRejected ? 'Rejected' : 'Approved'}</strong>
+                          <div className="muted tiny">
+                            by {ticket.team_head_approved_by_name ?? 'Team Head'}
+                          </div>
+                        </td>
+                        <td>{formatDateTime(ticket.team_head_approved_at)}</td>
+                        <td>
+                          <div className="cell-stack">
+                            <span>Approve {formatCurrency(getPayableTarget(ticket))}</span>
+                            <span className="muted tiny">
+                              Invoice {formatCurrency(Number(ticket.amount))}
+                            </span>
+                          </div>
+                        </td>
+                        <td>
+                          <span className="muted tiny">{ticket.team_head_remark || '—'}</span>
+                        </td>
+                        <td>
+                          <StatusBadge status={ticket.status} />
+                          <div className="muted tiny">{statusLabel(ticket.status)}</div>
+                        </td>
+                        <td>
+                          <a href={getPublicUrl(ticket.bill_path)} target="_blank" rel="noreferrer">
+                            Invoice
+                          </a>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
 
       <Modal
         open={!!selected}

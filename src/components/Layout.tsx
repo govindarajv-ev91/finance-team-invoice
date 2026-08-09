@@ -6,9 +6,11 @@ interface LayoutProps {
   title: string
   children: React.ReactNode
   sidebar?: React.ReactNode
+  /** Optional controls shown on the top-right of the page title row. */
+  actions?: React.ReactNode
 }
 
-export function Layout({ title, children, sidebar }: LayoutProps) {
+export function Layout({ title, children, sidebar, actions }: LayoutProps) {
   const { profile, signOut } = useAuth()
 
   return (
@@ -34,7 +36,10 @@ export function Layout({ title, children, sidebar }: LayoutProps) {
       <div className={`page-body ${sidebar ? 'with-sidebar' : ''}`}>
         {sidebar && <aside className="sidebar">{sidebar}</aside>}
         <main className="main-panel">
-          <h1 className="page-title">{title}</h1>
+          <div className="page-title-row">
+            <h1 className="page-title">{title}</h1>
+            {actions ? <div className="page-title-actions">{actions}</div> : null}
+          </div>
           {children}
         </main>
       </div>
