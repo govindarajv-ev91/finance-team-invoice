@@ -1627,15 +1627,18 @@ export function AdminDashboard() {
                 <input
                   value={financeEmails}
                   onChange={(e) => setFinanceEmails(e.target.value)}
-                  placeholder="finance@company.com"
+                  placeholder="finance1@ev91riderz.com, finance2@ev91riderz.com"
                 />
+                <span className="muted tiny">
+                  Multiple emails allowed — separate with commas (same for Admin / CEO).
+                </span>
               </label>
               <label>
                 CEO emails
                 <input
                   value={ceoEmails}
                   onChange={(e) => setCeoEmails(e.target.value)}
-                  placeholder="ceo@company.com"
+                  placeholder="ceo@ev91riderz.com, ceo2@ev91riderz.com"
                 />
               </label>
               <label>
