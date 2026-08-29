@@ -14,7 +14,7 @@ No Supabase Edge Function. No extra paid mail API required.
 | Process complete | User + Admin + Finance + CEO |
 | User account approved | User + Admin |
 | Remaining amount requested (urgent) | User + Admin + CEO + Finance |
-| Completion reminder (paid, not completed 3+ days) | User + Admin |
+| Completion reminder (paid, not completed 3+ days) | Ticket owner **and** Admin + Finance + Team Head + CEO (each person gets their own email) |
 
 - **User email** → from database `profiles.email`
 - **Admin / Finance / CEO emails** → typed manually in Admin page
@@ -65,10 +65,20 @@ When Finance has fully paid a ticket but the user has **not** clicked **Process 
 2. **Save** → Run **once**: `configureSupabaseOnce()`
    - If stuck, run `showWhichSupabaseKeyToUse()` and read the Execution log
 3. Run **once**: `installDailyCompletionReminderTrigger()` (runs daily ~9 AM)
-4. Test: run `showSupabaseConfigStatus()` then `testCompletionReminders()` — check **Execution log**
-4. Admin → **Email alerts** → set **Remind after (days)** (default 3) → Save
+4. Admin → **Email alerts** → set **Remind after (days)** (default 3) → Save  
+5. **Deploy → New version** after every `.gs` paste, then paste the new `/exec` URL in Admin if it changed.
+6. Optional: click **Send completion reminders now** — a Mail log row is written for each ticket, then Gmail sends **one separate email per person** (User + Admin + Finance + Team Head + CEO).
+7. Or test from Apps Script: `showSupabaseConfigStatus()` then `testCompletionReminders()`. To prove others receive mail, run `testSendToOneOtherPerson()`.
 
-Tickets like `LXDNS019` in status **Paid — Awaiting Complete** are included. Tracked in **Mail log tracker** as `completion_reminder`.
+Tickets like `EMIZN029` in status **Paid — Awaiting Complete** are included. Tracked in **Mail log tracker** as `completion_reminder`.
+
+### Why Mail log listed 6 people but only Admin received mail
+
+The Mail log line `6: gowtham.s@..., govindaraj.v@..., …` is the **planned list from the app**, not proof Gmail delivered to all six.
+
+Apps Script sends **from the Google account that owns the Web App** (usually Admin `govindaraj.v@ev91riderz.com`). That account always sees the message (Inbox or Sent). Older Web App versions put everyone in **one** To/Bcc line. Google Workspace frequently **delivers that message only to the script owner** and drops the rest — without marking the log as failed.
+
+The script now sends **six separate To: mails** (one address each) with a line `This copy is for: their@email`. After you paste the new `VoicEV91-Mail.gs` and deploy a **New version**, each person should get their own copy. Check **Spam** too. In Apps Script → **Executions**, you should see `SENT ok to=` for every address.
 
 ---
 

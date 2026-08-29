@@ -48,27 +48,57 @@ function doPost(e) {
     var subject = data.subject || 'VoicEV91 notification';
     var body = data.text || data.body || '';
     var html = data.html || '<pre>' + body + '</pre>';
+    var fromName = data.fromName || 'VoicEV91 Finance';
+    var eventName = String(data.event || '');
 
-    MailApp.sendEmail({
-      to: toList.join(','),
-      subject: subject,
-      body: body,
-      htmlBody: html,
-      name: data.fromName || 'VoicEV91 Finance',
-    });
+    // One Gmail message per address (never Bcc / never a comma-joined To list).
+    // Workspace often delivers a multi-recipient Apps Script mail only to the
+    // Google account that owns this script (Admin), which is why the mail log
+    // can list 6 people while only govindaraj.v@... receives it.
+    var result = sendMailToAll_(toList, subject, body, html, fromName);
 
-    // Cache ONLY after a successful send (so a failed attempt can retry)
-    if (dedupe) {
+    Logger.log(
+      'Mail sent event=' +
+        eventName +
+        ' ticket=' +
+        String(data.ticket_code || '') +
+        ' sent=' +
+        result.sent +
+        '/' +
+        toList.length +
+        ' to=' +
+        toList.join(', ') +
+        (result.failed.length ? ' failed=' + result.failed.join(' | ') : ''),
+    );
+
+    if (result.sent === 0) {
+      return json_({
+        ok: false,
+        mail_sent: false,
+        sent: 0,
+        to: toList,
+        failed: result.failed,
+        error: 'No recipients received mail. ' + result.failed.join(' | '),
+        dedupe_key: data.dedupe_key || null,
+      });
+    }
+
+    // Cache only when EVERY address was accepted (so a partial send can retry)
+    if (dedupe && !result.failed.length) {
       cache.put('sent:' + dedupe, '1', 600);
     }
 
     return json_({
       ok: true,
-      sent: toList.length,
+      mail_sent: true,
+      sent: result.sent,
       to: toList,
+      failed: result.failed,
+      error: result.failed.length ? 'Partial send: ' + result.failed.join(' | ') : null,
       dedupe_key: data.dedupe_key || null,
     });
   } catch (err) {
+    Logger.log('Mail send failed: ' + String(err));
     return json_({ ok: false, error: String(err) });
   }
 }
@@ -78,18 +108,118 @@ function doGet(e) {
   if (params.action === 'completion_reminders') {
     var secret = String(params.secret || '');
     var expected = PropertiesService.getScriptProperties().getProperty('CRON_SECRET') || '';
-    if (!expected || secret !== expected) {
-      return json_({ ok: false, error: 'Unauthorized' });
+    // Unique /exec URL is the access gate. If a secret is sent, it must match.
+    if (expected && secret && secret !== expected) {
+      return json_({ ok: false, mail_sent: false, sent: 0, error: 'Unauthorized' });
     }
     var result = runCompletionReminders();
+    result.mail_sent = result.ok !== false;
     return json_(result);
   }
-  return json_({ ok: true, service: 'VoicEV91 mail webhook' });
+  return json_({
+    ok: true,
+    mail_sent: false,
+    sent: 0,
+    service: 'VoicEV91 mail webhook',
+  });
 }
 
 function json_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(
     ContentService.MimeType.JSON,
+  );
+}
+
+/**
+ * Send a separate Gmail to EACH address with only that person in To.
+ *
+ * Do not put everyone in one To/Bcc line. MailApp then often delivers only to
+ * the Apps Script owner (Admin inbox / Sent), while mail_logs still lists all 6.
+ */
+function sendMailToAll_(toList, subject, body, html, fromName) {
+  var sent = 0;
+  var failed = [];
+  var name = fromName || 'VoicEV91 Finance';
+
+  for (var i = 0; i < toList.length; i++) {
+    var to = String(toList[i] || '').trim();
+    if (!to || to.indexOf('@') < 1) continue;
+
+    var stamp = 'copy-' + (i + 1) + '-' + new Date().getTime();
+    var perBody =
+      'This copy is for: ' + to + '\nAlso notified: ' + toList.join(', ') + '\n\n' + body;
+    var perHtml =
+      '<p style="margin:0 0 14px;padding:10px 12px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;font:13px/1.45 Arial,sans-serif;color:#0c4a6e;">' +
+      'This copy is for <strong>' +
+      escapeHtml_(to) +
+      '</strong>.<br>Also notified: ' +
+      escapeHtml_(toList.join(', ')) +
+      '</p>' +
+      html +
+      '<!-- ' +
+      stamp +
+      ' -->';
+
+    try {
+      sendOneEmail_(to, subject, perBody, perHtml, name);
+      Logger.log('SENT ok to=' + to);
+      sent++;
+    } catch (err) {
+      Logger.log('SENT fail to=' + to + ' err=' + String(err));
+      failed.push(to + ': ' + String(err));
+    }
+
+    // Slow down so Gmail does not collapse 6 identical sends into one (owner-only).
+    if (i < toList.length - 1) {
+      Utilities.sleep(400);
+    }
+  }
+
+  return { sent: sent, failed: failed };
+}
+
+function sendOneEmail_(to, subject, body, html, fromName) {
+  MailApp.sendEmail({
+    to: to,
+    subject: subject,
+    body: body,
+    htmlBody: html,
+    name: fromName || 'VoicEV91 Finance',
+  });
+}
+
+function escapeHtml_(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/**
+ * Run once in the editor (select → Run) after pasting this file.
+ * Grants MailApp permission and logs remaining daily quota.
+ */
+function authorizeMailSend() {
+  Logger.log('MailApp remaining daily quota: ' + MailApp.getRemainingDailyQuota());
+}
+
+/**
+ * Delivery test: sends TWO mails — one to YOU (Admin) and one to another person.
+ * 1) Replace OTHER_INBOX below with gowtham.s@ev91riderz.com (or Finance).
+ * 2) Run this function. Check BOTH inboxes (and Spam).
+ * If only Admin gets it, Google Workspace is blocking outbound Apps Script mail.
+ */
+function testSendToOneOtherPerson() {
+  var OTHER_INBOX = 'gowtham.s@ev91riderz.com';
+  var me = Session.getActiveUser().getEmail();
+  var subject = 'VoicEV91 delivery test ' + new Date().toISOString();
+  sendMailToAll_(
+    [me, OTHER_INBOX],
+    subject,
+    'If both inboxes received this, completion reminders can reach the full team.',
+    '<p>If both inboxes received this, completion reminders can reach the full team.</p>',
+    'VoicEV91 Finance',
   );
 }
 
@@ -220,14 +350,120 @@ function testCompletionReminders() {
   return result;
 }
 
+/**
+ * Diagnose one ticket (edit CODE below, then Run).
+ * Example: why EMIZN029 did not get a reminder.
+ */
+function diagnoseTicketReminder() {
+  var CODE = 'EMIZN029';
+  var cfg = getSupabaseConfig_();
+  if (!cfg.ok) {
+    Logger.log(JSON.stringify(cfg, null, 2));
+    return cfg;
+  }
+
+  var rows = supabaseGet_(
+    cfg,
+    'tickets?ticket_code=eq.' +
+      encodeURIComponent(CODE) +
+      '&select=id,ticket_code,status,amount,paid_amount,paid_at,created_at,user_id,profiles!user_id(email,full_name)',
+  );
+  var ticket = rows && rows[0] ? rows[0] : null;
+  if (!ticket) {
+    var missing = { ok: false, error: 'Ticket not found: ' + CODE };
+    Logger.log(JSON.stringify(missing, null, 2));
+    return missing;
+  }
+
+  var settingsRows;
+  try {
+    settingsRows = supabaseGet_(
+      cfg,
+      'notification_settings?select=admin_emails,completion_reminder_days,completion_reminder_enabled&id=eq.1',
+    );
+  } catch (err) {
+    var patchNeeded = {
+      ok: false,
+      error: 'Run supabase/patch-completion-reminder.sql in Supabase SQL Editor first. ' + String(err),
+    };
+    Logger.log(JSON.stringify(patchNeeded, null, 2));
+    return patchNeeded;
+  }
+  var settings = settingsRows && settingsRows[0] ? settingsRows[0] : {};
+  var days = parseInt(settings.completion_reminder_days, 10) || 3;
+  var daysSincePaid = daysSince_(ticket.paid_at);
+  var daysSinceCreated = daysSince_(ticket.created_at);
+  var fullyPaid = isInvoiceFullyPaid_(ticket);
+  var reasons = [];
+
+  if (settings.completion_reminder_enabled === false) reasons.push('completion_reminder_enabled is OFF in Admin');
+  if (ticket.status !== 'paid') reasons.push('status is "' + ticket.status + '" (need paid)');
+  if (!ticket.paid_at) reasons.push('paid_at is empty');
+  if (!fullyPaid) {
+    reasons.push(
+      'invoice not fully paid (amount=' + ticket.amount + ', paid_amount=' + ticket.paid_amount + ')',
+    );
+  }
+  if (ticket.paid_at && daysSincePaid < days) {
+    reasons.push(
+      'only ' +
+        daysSincePaid +
+        ' day(s) since paid_at — need ' +
+        days +
+        '+ (UI "X days open" uses created_at, reminder uses paid_at)',
+    );
+  }
+  if (!(ticket.profiles && ticket.profiles.email)) reasons.push('user profile has no email');
+
+  var triggers = ScriptApp.getProjectTriggers();
+  var hasTrigger = false;
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'runCompletionReminders') hasTrigger = true;
+  }
+  if (!hasTrigger) {
+    reasons.push('Daily trigger NOT installed — run installDailyCompletionReminderTrigger() once');
+  }
+
+  var out = {
+    ok: reasons.length === 0,
+    ticket_code: ticket.ticket_code,
+    status: ticket.status,
+    invoice_amount: ticket.amount,
+    paid_amount: ticket.paid_amount,
+    paid_at: ticket.paid_at,
+    days_since_paid: daysSincePaid,
+    days_since_created: daysSinceCreated,
+    reminder_after_days: days,
+    user_email: ticket.profiles && ticket.profiles.email,
+    eligible: reasons.length === 0,
+    blockers: reasons,
+    tip:
+      reasons.length === 0
+        ? 'Ticket is eligible. Run testCompletionReminders() to send now.'
+        : 'Fix the blockers above, then run testCompletionReminders().',
+  };
+  Logger.log(JSON.stringify(out, null, 2));
+  return out;
+}
+
 function runCompletionReminders() {
   var cfg = getSupabaseConfig_();
   if (!cfg.ok) return cfg;
 
-  var settingsRows = supabaseGet_(
-    cfg,
-    'notification_settings?select=admin_emails,from_name,completion_reminder_days,completion_reminder_enabled&id=eq.1',
-  );
+  var settingsRows;
+  try {
+    settingsRows = supabaseGet_(
+      cfg,
+      'notification_settings?select=admin_emails,finance_emails,ceo_emails,from_name,completion_reminder_days,completion_reminder_enabled&id=eq.1',
+    );
+  } catch (err) {
+    return {
+      ok: false,
+      error:
+        'Missing reminder columns. Run supabase/patch-completion-reminder.sql in Supabase SQL Editor. Details: ' +
+        String(err),
+    };
+  }
   var settings = settingsRows && settingsRows[0] ? settingsRows[0] : {};
   if (settings.completion_reminder_enabled === false) {
     return { ok: true, skipped: true, reason: 'completion_reminder_enabled is false' };
@@ -243,21 +479,25 @@ function runCompletionReminders() {
   var path =
     'tickets?status=eq.paid&paid_at=not.is.null&paid_at=lte.' +
     encodeURIComponent(cutoffIso) +
-    '&select=id,ticket_code,subject,purpose,amount,paid_amount,paid_at,paid_by_name,status,user_id,profiles!user_id(email,full_name)';
+    '&select=id,ticket_code,subject,purpose,amount,paid_amount,paid_at,paid_by_name,status,user_id,profiles!user_id(email,full_name),departments(team_head_emails)';
 
   var tickets = supabaseGet_(cfg, path) || [];
   var appUrl = cfg.appUrl;
   var fromName = settings.from_name || 'VoicEV91 Finance';
   var adminEmails = splitEmails_(settings.admin_emails);
+  var financeEmails = splitEmails_(settings.finance_emails);
+  var ceoEmails = splitEmails_(settings.ceo_emails);
   var todayKey = todayKey_();
   var sent = 0;
   var skipped = 0;
   var errors = [];
+  var skippedCodes = [];
 
   for (var i = 0; i < tickets.length; i++) {
     var ticket = tickets[i];
     if (!isInvoiceFullyPaid_(ticket)) {
       skipped++;
+      skippedCodes.push((ticket.ticket_code || '?') + ':not_fully_paid');
       continue;
     }
 
@@ -270,6 +510,7 @@ function runCompletionReminders() {
     var dedupeKey = code + ':completion_reminder:' + todayKey;
     if (mailLogAlreadySent_(cfg, dedupeKey)) {
       skipped++;
+      skippedCodes.push(code + ':already_sent_today');
       continue;
     }
 
@@ -277,25 +518,37 @@ function runCompletionReminders() {
     var userEmail = String(profile.email || '').trim().toLowerCase();
     if (!userEmail) {
       skipped++;
+      skippedCodes.push(code + ':no_user_email');
       continue;
     }
 
     var daysWaiting = daysSince_(ticket.paid_at);
     var mail = buildCompletionReminderMail_(ticket, profile, daysWaiting, appUrl);
-    var recipients = uniqueEmails_([userEmail].concat(adminEmails));
+    var teamHeadEmails = splitEmails_(
+      ticket.departments && ticket.departments.team_head_emails
+        ? ticket.departments.team_head_emails
+        : '',
+    );
+    var recipients = uniqueEmails_(
+      [userEmail].concat(adminEmails).concat(financeEmails).concat(teamHeadEmails).concat(ceoEmails),
+    );
     if (!recipients.length) {
       skipped++;
+      skippedCodes.push(code + ':no_recipients');
       continue;
     }
 
     try {
-      MailApp.sendEmail({
-        to: recipients.join(','),
-        subject: mail.subject,
-        body: mail.text,
-        htmlBody: mail.html,
-        name: fromName,
-      });
+      var sendResult = sendMailToAll_(
+        recipients,
+        mail.subject,
+        mail.text,
+        mail.html,
+        fromName,
+      );
+      if (sendResult.sent === 0) {
+        throw new Error(sendResult.failed.join(' | ') || 'No mail sent');
+      }
 
       logMail_(cfg, {
         event_type: 'completion_reminder',
@@ -303,12 +556,15 @@ function runCompletionReminders() {
         recipients: recipients.join(', '),
         subject: mail.subject,
         status: 'sent',
+        error_message: sendResult.failed.length
+          ? 'Partial send: ' + sendResult.failed.join(' | ')
+          : null,
         dedupe_key: dedupeKey,
-        recipient_count: recipients.length,
+        recipient_count: sendResult.sent,
       });
       sent++;
-    } catch (err) {
-      var errMsg = String(err).slice(0, 500);
+    } catch (sendErr) {
+      var errMsg = String(sendErr).slice(0, 500);
       logMail_(cfg, {
         event_type: 'completion_reminder',
         ticket_code: code,
@@ -325,9 +581,11 @@ function runCompletionReminders() {
 
   return {
     ok: true,
+    mail_sent: sent > 0 || tickets.length === 0,
     scanned: tickets.length,
     sent: sent,
     skipped: skipped,
+    skipped_detail: skippedCodes.slice(0, 30),
     errors: errors,
     cutoff: cutoffIso,
     reminder_days: days,
@@ -396,7 +654,7 @@ function buildCompletionReminderMail_(ticket, profile, daysWaiting, appUrl) {
     code +
     ' has been fully paid for ' +
     daysWaiting +
-    ' day(s) but is still open. Please log in and click Process Complete.';
+    ' day(s) but is still open. The ticket owner must click Process Complete. This mail is also sent to Admin, Finance, Team Head and CEO.';
 
   var text =
     headline +

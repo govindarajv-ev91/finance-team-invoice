@@ -177,7 +177,7 @@ export function buildGreenMailTemplate(input: TemplateInput): BuiltMail {
     completion_reminder: {
       subject: `[${brand}] Reminder — complete ticket ${code}`,
       headline: 'Reminder: mark ticket as Process Complete',
-      intro: `Ticket <strong>${esc(code)}</strong> has been <strong>fully paid</strong> but is still open. Please log in and click <strong>Process Complete</strong> to close it.`,
+      intro: `Ticket <strong>${esc(code)}</strong> has been <strong>fully paid</strong> but is still open. The ticket owner must log in and click <strong>Process Complete</strong>. This mail is also sent to <strong>Admin, Finance, Team Head and CEO</strong>.`,
       statusLabel: 'Paid — Awaiting Complete',
       statusTone: 'warn',
     },

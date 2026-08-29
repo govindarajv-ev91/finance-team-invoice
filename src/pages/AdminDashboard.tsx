@@ -24,7 +24,7 @@ import {
   priorityLabel,
   ticketDayCountLabel,
 } from '../lib/helpers'
-import { notifyTicket } from '../lib/notify'
+import { notifyTicket, retryMailLogSend, runCompletionRemindersNow } from '../lib/notify'
 import { matchesSearch } from '../lib/search'
 import type { Department, Profile, Ticket, UserRole } from '../types/database'
 import './Dashboard.css'
@@ -107,6 +107,8 @@ export function AdminDashboard() {
   const [completionReminderDays, setCompletionReminderDays] = useState('3')
   const [completionReminderEnabled, setCompletionReminderEnabled] = useState(true)
   const [savingEmails, setSavingEmails] = useState(false)
+  const [sendingReminders, setSendingReminders] = useState(false)
+  const [retryingMailKey, setRetryingMailKey] = useState<string | null>(null)
   const [mailLogs, setMailLogs] = useState<MailLog[]>([])
   const [mailLogSearch, setMailLogSearch] = useState('')
 
@@ -128,7 +130,7 @@ export function AdminDashboard() {
         .select('*, profiles!user_id(*), departments(*)')
         .order('created_at', { ascending: false }),
       supabase.from('notification_settings').select('*').eq('id', 1).maybeSingle(),
-      supabase.from('mail_logs').select('*').order('created_at', { ascending: false }).limit(100),
+      supabase.from('mail_logs').select('*').order('created_at', { ascending: false }).limit(300),
     ])
     if (d.error || u.error || c.error || t.error) {
       setError(
@@ -416,6 +418,58 @@ export function AdminDashboard() {
       return
     }
     setInfo('Email alert settings saved.')
+  }
+
+  async function triggerCompletionReminders() {
+    clearMessages()
+    if (
+      !window.confirm(
+        'Send completion reminder emails now?\n\nThis writes a Mail log row for each paid-open ticket and emails User, Admin, Finance, Team Head and CEO.',
+      )
+    ) {
+      return
+    }
+    setSendingReminders(true)
+    try {
+      const result = await runCompletionRemindersNow()
+      if (!result.ok) {
+        setError(result.message)
+      } else {
+        setInfo(
+          result.ticketCodes.length > 0
+            ? `${result.message} Tickets: ${result.ticketCodes.slice(0, 20).join(', ')}${result.ticketCodes.length > 20 ? '…' : ''}`
+            : result.message,
+        )
+      }
+      await loadAll()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send completion reminders')
+    } finally {
+      setSendingReminders(false)
+    }
+  }
+
+  async function onRetryMailLog(dedupeKey: string | null) {
+    if (!dedupeKey) return
+    clearMessages()
+    if (
+      !window.confirm(
+        `Retry send for this mail log?\n\n${dedupeKey}\n\nUse this if status shows sent but inbox is empty (false success).`,
+      )
+    ) {
+      return
+    }
+    setRetryingMailKey(dedupeKey)
+    try {
+      const result = await retryMailLogSend(dedupeKey)
+      if (!result.ok) setError(result.message)
+      else setInfo(result.message)
+      await loadAll()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Retry failed')
+    } finally {
+      setRetryingMailKey(null)
+    }
   }
 
   async function savePasswordRecord(userId: string, email: string, fullName: string, role: UserRole) {
@@ -1657,8 +1711,8 @@ export function AdminDashboard() {
               <h3 style={{ margin: '0.25rem 0' }}>Completion reminder (auto mail)</h3>
               <p className="muted tiny">
                 When a ticket is <strong>Paid — Awaiting Complete</strong> and the user does not click Process
-                Complete, a daily reminder email is sent after the number of days below. Requires Google Apps
-                Script daily trigger — see docs/EMAIL-SETUP.md.
+                Complete, a reminder email is sent to <strong>the ticket owner, Admin, Finance, Team Head and
+                CEO</strong> after the number of days below.
               </p>
               <label className="checkbox-row">
                 <input
@@ -1687,13 +1741,29 @@ export function AdminDashboard() {
                 {savingEmails ? 'Saving…' : 'Save email settings'}
               </button>
             </form>
+            <div className="btn-row" style={{ marginTop: '1rem' }}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={sendingReminders || !completionReminderEnabled}
+                onClick={() => void triggerCompletionReminders()}
+              >
+                {sendingReminders ? 'Sending reminders…' : 'Send completion reminders now'}
+              </button>
+            </div>
+            <p className="muted tiny" style={{ marginTop: '0.5rem' }}>
+              Manual trigger uses the same rules as the daily Apps Script job (paid{' '}
+              {completionReminderDays || 3}+ days, not completed). Check Mail log tracker for{' '}
+              <code>completion_reminder</code>.
+            </p>
           </section>
 
           <section className="card" style={{ marginTop: 16 }}>
             <h2>Mail log tracker</h2>
             <p className="muted">
-              Search by ticket (e.g. AWPBU003). Each row is one send attempt — same ticket + same event
-              cannot create a second row.
+              Search by ticket (e.g. EMIZN029). Status <strong>sent</strong> only counts when Apps Script
+              returns JSON <code>ok:true</code>. If inbox is empty, click <strong>Retry</strong> and check
+              spam. Also confirm Web app URL is the latest deployment.
             </p>
             <SearchBox
               value={mailLogSearch}
@@ -1710,6 +1780,7 @@ export function AdminDashboard() {
                     <th>To (count)</th>
                     <th>Status</th>
                     <th>Dedupe key</th>
+                    <th>Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1732,6 +1803,20 @@ export function AdminDashboard() {
                         ) : null}
                       </td>
                       <td className="muted tiny">{row.dedupe_key || '—'}</td>
+                      <td>
+                        {row.dedupe_key ? (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            disabled={retryingMailKey === row.dedupe_key}
+                            onClick={() => void onRetryMailLog(row.dedupe_key)}
+                          >
+                            {retryingMailKey === row.dedupe_key ? 'Retrying…' : 'Retry'}
+                          </button>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
