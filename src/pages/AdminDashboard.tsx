@@ -4,6 +4,7 @@ import { Modal } from '../components/Modal'
 import { SearchBox } from '../components/SearchBox'
 import { DateRangeFilter } from '../components/DateRangeFilter'
 import { StatusBadge } from '../components/StatusBadge'
+import { KanbanBoard } from '../components/KanbanBoard'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { downloadExcel } from '../lib/excel'
@@ -94,6 +95,7 @@ export function AdminDashboard() {
     | 'rejected'
   >('all')
   const [showPasswords, setShowPasswords] = useState(false)
+  const [ticketViewMode, setTicketViewMode] = useState<'table' | 'board'>('board')
   const [ticketSearch, setTicketSearch] = useState('')
   const [createdDateFilter, setCreatedDateFilter] = useState(DEFAULT_CREATED_DATE_FILTER)
   const [userSearch, setUserSearch] = useState('')
@@ -785,7 +787,6 @@ export function AdminDashboard() {
           )}
         </section>
       )}
-
       {tab === 'tickets' && (
         <section className="card">
           <div className="toolbar">
@@ -794,6 +795,22 @@ export function AdminDashboard() {
               <p className="muted" style={{ marginBottom: 0 }}>Filter, search, and download the list.</p>
             </div>
             <div className="btn-row">
+              <div className="view-toggle">
+                <button
+                  type="button"
+                  className={`view-toggle-btn ${ticketViewMode === 'board' ? 'active' : ''}`}
+                  onClick={() => setTicketViewMode('board')}
+                >
+                  ▦ Board
+                </button>
+                <button
+                  type="button"
+                  className={`view-toggle-btn ${ticketViewMode === 'table' ? 'active' : ''}`}
+                  onClick={() => setTicketViewMode('table')}
+                >
+                  ☰ Table
+                </button>
+              </div>
               <SearchBox
                 value={ticketSearch}
                 onChange={setTicketSearch}
@@ -805,245 +822,267 @@ export function AdminDashboard() {
             </div>
           </div>
           <DateRangeFilter value={createdDateFilter} onChange={setCreatedDateFilter} />
-          <div className="filter-tabs" style={{ margin: '1rem 0' }}>
-            {(
-              [
-                'all',
-                'awaiting_team_head',
-                'awaiting_ceo',
-                'pending',
-                'partial',
-                'paid',
-                'completed',
-                'rejected',
-              ] as const
-            ).map((f) => (
-              <button
-                key={f}
-                type="button"
-                className={`chip ${statusFilter === f ? 'active' : ''}`}
-                onClick={() => setStatusFilter(f)}
-              >
-                {f === 'all'
-                  ? 'All'
-                  : f === 'awaiting_team_head'
-                    ? 'Awaiting Team Head'
-                  : f === 'awaiting_ceo'
-                    ? 'Awaiting CEO'
-                    : f === 'partial'
-                      ? 'Partial'
-                      : f.charAt(0).toUpperCase() + f.slice(1)}
-              </button>
-            ))}
-          </div>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Ticket</th>
-                  <th>User / Dept</th>
-                  <th>Purpose</th>
-                  <th>Amounts</th>
-                  <th>Status &amp; timeline</th>
-                  <th>Bank / Files</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredTickets.map((t) => {
-                  const paid = getPaidTotal(t)
-                  const pendingAmt = getPendingAmount(t)
-                  const target = getPayableTarget(t)
-                  const invoiceLeft = getInvoiceRemaining(t)
-                  const utrs = getUtrNumbers(t)
-                  return (
-                    <tr key={t.id} className={t.urgent ? 'row-urgent' : undefined}>
-                      <td>
-                        <code>{t.ticket_code}</code>
-                        {(t.urgent || t.remaining_requested_at) && (
-                          <div>
-                            <span className="urgent-badge">URGENT</span>
-                          </div>
-                        )}
-                        <div className="muted tiny">{ticketDayCountLabel(t)}</div>
-                        <div className="muted tiny">Inv #{t.invoice_number ?? '—'}</div>
-                      </td>
-                      <td>
-                        <div className="cell-stack">
-                          <strong>{t.profiles?.full_name ?? '—'}</strong>
-                          <span className="muted tiny">{t.profiles?.email}</span>
-                          <span className="muted tiny">{t.departments?.name ?? '—'}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <div className="cell-stack">
-                          <span>{t.purpose ?? '—'}</span>
-                          <span className="muted tiny">{t.subject}</span>
-                          {t.remark && <span className="muted tiny">User: {t.remark}</span>}
-                          {t.ceo_remark && <span className="muted tiny">CEO: {t.ceo_remark}</span>}
-                        </div>
-                      </td>
-                      <td>
-                        <div className="cell-stack">
-                          <strong>Invoice {formatCurrency(Number(t.amount))}</strong>
-                          <span className="muted tiny">
-                            Payable {formatCurrency(target)}
-                            {t.payable_percent != null && !t.remaining_requested_at
-                              ? ` (${t.payable_percent}%)`
-                              : ''}
-                          </span>
-                          <span className="muted tiny">Paid {formatCurrency(paid)}</span>
-                          {pendingAmt > 0 ? (
-                            <span className="pending-amt">
-                              Still to pay now {formatCurrency(pendingAmt)}
-                            </span>
-                          ) : invoiceLeft > 0 ? (
-                            <span className="muted tiny">
-                              Invoice left {formatCurrency(invoiceLeft)}
-                            </span>
-                          ) : (
-                            <span className="muted tiny">Invoice fully paid</span>
-                          )}
-                          {utrs.length > 0 && (
-                            <span className="muted tiny">
-                              UTR{utrs.length > 1 ? 's' : ''}: {utrs.join(', ')}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td>
-                        <div className="cell-stack ticket-timeline">
-                          <StatusBadge status={t.status} />
-                          <span className="muted tiny">
-                            Created — {t.profiles?.full_name ?? 'User'} ·{' '}
-                            {formatDateTime(t.created_at)}
-                          </span>
-                          {(() => {
-                            const approvals = getApprovalEntries(t)
-                            if (approvals.length > 0) {
-                              return approvals.map((a, i) => (
-                                <span className="muted tiny" key={`ap-${i}`}>
-                                  {a.action} — {a.by} · {formatDateTime(a.at)}
-                                  {a.remark ? ` · “${a.remark}”` : ''}
-                                </span>
-                              ))
-                            }
-                            // legacy tickets without approval_history
-                            return (
-                              <>
-                                {t.ceo_approved_at ? (
-                                  <span className="muted tiny">
-                                    CEO {t.status === 'rejected' ? 'rejected' : 'approved'} —{' '}
-                                    {t.ceo_approved_by_name ?? 'CEO'} ·{' '}
-                                    {formatDateTime(t.ceo_approved_at)}
-                                    {t.ceo_remark ? ` · “${t.ceo_remark}”` : ''}
-                                  </span>
-                                ) : null}
-                                {t.remaining_requested_at && (
-                                  <span className="muted tiny">
-                                    Remaining requested ·{' '}
-                                    {formatDateTime(t.remaining_requested_at)}
-                                  </span>
-                                )}
-                              </>
-                            )
-                          })()}
-                          {t.status === 'awaiting_team_head' && (
-                            <span className="muted tiny">Waiting Team Head approval…</span>
-                          )}
-                          {t.status === 'awaiting_ceo' && (
-                            <span className="muted tiny">Waiting CEO approval…</span>
-                          )}
-                          {(() => {
-                            const pays = getPaymentEntries(t)
-                            if (pays.length > 0) {
-                              return pays.map((p, i) => (
-                                <span className="muted tiny" key={`pay-${i}`}>
-                                  Paid {p.amount} — {p.by} · UTR {p.utr} ·{' '}
-                                  {formatDateTime(p.at)}
-                                </span>
-                              ))
-                            }
-                            return t.paid_at ? (
-                              <span className="muted tiny">
-                                Finance paid — {t.paid_by_name ?? 'Finance'} ·{' '}
-                                {formatCurrency(paid)} · {formatDateTime(t.paid_at)}
-                              </span>
-                            ) : null
-                          })()}
-                          {(t.status === 'pending' || t.status === 'partial') &&
-                            pendingAmt > 0 && (
-                              <span className="muted tiny">Waiting Finance payment…</span>
-                            )}
-                          {t.completed_at ? (
-                            <span className="muted tiny">
-                              Completed · {formatDateTime(t.completed_at)}
-                              {t.completion_remark ? ` · “${t.completion_remark}”` : ''}
-                            </span>
-                          ) : t.status === 'paid' ? (
-                            <span className="muted tiny">Waiting user completion…</span>
-                          ) : null}
-                          <span className={`priority-badge priority-${t.priority || 'medium'}`}>
-                            {priorityLabel(t.priority)}
-                          </span>
-                          {t.due_at && (
-                            <span className="muted tiny">Due {formatDateTime(t.due_at)}</span>
-                          )}
-                        </div>
-                      </td>
-                      <td>
-                        <div className="cell-stack">
-                          <span>{t.bank_name ?? '—'}</span>
-                          <span className="muted tiny">{t.account_number ?? '—'}</span>
-                          <span className="muted tiny">{t.ifsc_code ?? '—'}</span>
-                          <a href={getPublicUrl(t.bill_path)} target="_blank" rel="noreferrer">
-                            Invoice
-                          </a>
-                          {t.user_cheque_path && (
-                            <a
-                              href={getPublicUrl(t.user_cheque_path)}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              User cheque
-                            </a>
-                          )}
-                          {t.cheque_path && (
-                            <a href={getPublicUrl(t.cheque_path)} target="_blank" rel="noreferrer">
-                              {t.cheque_name || 'Pay cheque'}
-                            </a>
-                          )}
-                          {t.completion_path && (
-                            <a
-                              href={getPublicUrl(t.completion_path)}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              {t.completion_name || 'Completion'}
-                            </a>
-                          )}
-                        </div>
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => setDetailTicket(t)}
-                        >
-                          Full details
-                        </button>
-                      </td>
+
+          {/* Status filter tabs — only shown in table view */}
+          {ticketViewMode === 'table' && (
+            <div className="filter-tabs" style={{ margin: '1rem 0' }}>
+              {(
+                [
+                  'all',
+                  'awaiting_team_head',
+                  'awaiting_ceo',
+                  'pending',
+                  'partial',
+                  'paid',
+                  'completed',
+                  'rejected',
+                ] as const
+              ).map((f) => (
+                <button
+                  key={f}
+                  type="button"
+                  className={`chip ${statusFilter === f ? 'active' : ''}`}
+                  onClick={() => setStatusFilter(f)}
+                >
+                  {f === 'all'
+                    ? 'All'
+                    : f === 'awaiting_team_head'
+                      ? 'Awaiting Team Head'
+                    : f === 'awaiting_ceo'
+                      ? 'Awaiting CEO'
+                      : f === 'partial'
+                        ? 'Partial'
+                        : f.charAt(0).toUpperCase() + f.slice(1)}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* ── Board view (Kanban) ── */}
+          {ticketViewMode === 'board' && (
+            <div style={{ marginTop: '1rem' }}>
+              <KanbanBoard
+                tickets={ticketSearch || createdDateFilter !== DEFAULT_CREATED_DATE_FILTER
+                  ? filteredTickets
+                  : tickets}
+                onSelectTicket={setDetailTicket}
+              />
+            </div>
+          )}
+
+          {/* ── Table view (existing) ── */}
+          {ticketViewMode === 'table' && (
+            <>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Ticket</th>
+                      <th>User / Dept</th>
+                      <th>Purpose</th>
+                      <th>Amounts</th>
+                      <th>Status &amp; timeline</th>
+                      <th>Bank / Files</th>
+                      <th></th>
                     </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-            {filteredTickets.length === 0 && (
-              <p className="empty-hint">
-                {ticketSearch ? `No tickets match “${ticketSearch}”.` : 'No tickets for this status.'}
-              </p>
-            )}
-          </div>
+                  </thead>
+                  <tbody>
+                    {filteredTickets.map((t) => {
+                      const paid = getPaidTotal(t)
+                      const pendingAmt = getPendingAmount(t)
+                      const target = getPayableTarget(t)
+                      const invoiceLeft = getInvoiceRemaining(t)
+                      const utrs = getUtrNumbers(t)
+                      return (
+                        <tr key={t.id} className={t.urgent ? 'row-urgent' : undefined}>
+                          <td>
+                            <code>{t.ticket_code}</code>
+                            {(t.urgent || t.remaining_requested_at) && (
+                              <div>
+                                <span className="urgent-badge">URGENT</span>
+                              </div>
+                            )}
+                            <div className="muted tiny">{ticketDayCountLabel(t)}</div>
+                            <div className="muted tiny">Inv #{t.invoice_number ?? '—'}</div>
+                          </td>
+                          <td>
+                            <div className="cell-stack">
+                              <strong>{t.profiles?.full_name ?? '—'}</strong>
+                              <span className="muted tiny">{t.profiles?.email}</span>
+                              <span className="muted tiny">{t.departments?.name ?? '—'}</span>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="cell-stack">
+                              <span>{t.purpose ?? '—'}</span>
+                              <span className="muted tiny">{t.subject}</span>
+                              {t.remark && <span className="muted tiny">User: {t.remark}</span>}
+                              {t.ceo_remark && <span className="muted tiny">CEO: {t.ceo_remark}</span>}
+                            </div>
+                          </td>
+                          <td>
+                            <div className="cell-stack">
+                              <strong>Invoice {formatCurrency(Number(t.amount))}</strong>
+                              <span className="muted tiny">
+                                Payable {formatCurrency(target)}
+                                {t.payable_percent != null && !t.remaining_requested_at
+                                  ? ` (${t.payable_percent}%)`
+                                  : ''}
+                              </span>
+                              <span className="muted tiny">Paid {formatCurrency(paid)}</span>
+                              {pendingAmt > 0 ? (
+                                <span className="pending-amt">
+                                  Still to pay now {formatCurrency(pendingAmt)}
+                                </span>
+                              ) : invoiceLeft > 0 ? (
+                                <span className="muted tiny">
+                                  Invoice left {formatCurrency(invoiceLeft)}
+                                </span>
+                              ) : (
+                                <span className="muted tiny">Invoice fully paid</span>
+                              )}
+                              {utrs.length > 0 && (
+                                <span className="muted tiny">
+                                  UTR{utrs.length > 1 ? 's' : ''}: {utrs.join(', ')}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td>
+                            <div className="cell-stack ticket-timeline">
+                              <StatusBadge status={t.status} />
+                              <span className="muted tiny">
+                                Created — {t.profiles?.full_name ?? 'User'} ·{' '}
+                                {formatDateTime(t.created_at)}
+                              </span>
+                              {(() => {
+                                const approvals = getApprovalEntries(t)
+                                if (approvals.length > 0) {
+                                  return approvals.map((a, i) => (
+                                    <span className="muted tiny" key={`ap-${i}`}>
+                                      {a.action} — {a.by} · {formatDateTime(a.at)}
+                                      {a.remark ? ` · "${a.remark}"` : ''}
+                                    </span>
+                                  ))
+                                }
+                                // legacy tickets without approval_history
+                                return (
+                                  <>
+                                    {t.ceo_approved_at ? (
+                                      <span className="muted tiny">
+                                        CEO {t.status === 'rejected' ? 'rejected' : 'approved'} —{' '}
+                                        {t.ceo_approved_by_name ?? 'CEO'} ·{' '}
+                                        {formatDateTime(t.ceo_approved_at)}
+                                        {t.ceo_remark ? ` · "${t.ceo_remark}"` : ''}
+                                      </span>
+                                    ) : null}
+                                    {t.remaining_requested_at && (
+                                      <span className="muted tiny">
+                                        Remaining requested ·{' '}
+                                        {formatDateTime(t.remaining_requested_at)}
+                                      </span>
+                                    )}
+                                  </>
+                                )
+                              })()}
+                              {t.status === 'awaiting_team_head' && (
+                                <span className="muted tiny">Waiting Team Head approval…</span>
+                              )}
+                              {t.status === 'awaiting_ceo' && (
+                                <span className="muted tiny">Waiting CEO approval…</span>
+                              )}
+                              {(() => {
+                                const pays = getPaymentEntries(t)
+                                if (pays.length > 0) {
+                                  return pays.map((p, i) => (
+                                    <span className="muted tiny" key={`pay-${i}`}>
+                                      Paid {p.amount} — {p.by} · UTR {p.utr} ·{' '}
+                                      {formatDateTime(p.at)}
+                                    </span>
+                                  ))
+                                }
+                                return t.paid_at ? (
+                                  <span className="muted tiny">
+                                    Finance paid — {t.paid_by_name ?? 'Finance'} ·{' '}
+                                    {formatCurrency(paid)} · {formatDateTime(t.paid_at)}
+                                  </span>
+                                ) : null
+                              })()}
+                              {(t.status === 'pending' || t.status === 'partial') &&
+                                pendingAmt > 0 && (
+                                  <span className="muted tiny">Waiting Finance payment…</span>
+                                )}
+                              {t.completed_at ? (
+                                <span className="muted tiny">
+                                  Completed · {formatDateTime(t.completed_at)}
+                                  {t.completion_remark ? ` · "${t.completion_remark}"` : ''}
+                                </span>
+                              ) : t.status === 'paid' ? (
+                                <span className="muted tiny">Waiting user completion…</span>
+                              ) : null}
+                              <span className={`priority-badge priority-${t.priority || 'medium'}`}>
+                                {priorityLabel(t.priority)}
+                              </span>
+                              {t.due_at && (
+                                <span className="muted tiny">Due {formatDateTime(t.due_at)}</span>
+                              )}
+                            </div>
+                          </td>
+                          <td>
+                            <div className="cell-stack">
+                              <span>{t.bank_name ?? '—'}</span>
+                              <span className="muted tiny">{t.account_number ?? '—'}</span>
+                              <span className="muted tiny">{t.ifsc_code ?? '—'}</span>
+                              <a href={getPublicUrl(t.bill_path)} target="_blank" rel="noreferrer">
+                                Invoice
+                              </a>
+                              {t.user_cheque_path && (
+                                <a
+                                  href={getPublicUrl(t.user_cheque_path)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  User cheque
+                                </a>
+                              )}
+                              {t.cheque_path && (
+                                <a href={getPublicUrl(t.cheque_path)} target="_blank" rel="noreferrer">
+                                  {t.cheque_name || 'Pay cheque'}
+                                </a>
+                              )}
+                              {t.completion_path && (
+                                <a
+                                  href={getPublicUrl(t.completion_path)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  {t.completion_name || 'Completion'}
+                                </a>
+                              )}
+                            </div>
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => setDetailTicket(t)}
+                            >
+                              Full details
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+                {filteredTickets.length === 0 && (
+                  <p className="empty-hint">
+                    {ticketSearch ? `No tickets match "${ticketSearch}".` : 'No tickets for this status.'}
+                  </p>
+                )}
+              </div>
+            </>
+          )}
         </section>
       )}
 
