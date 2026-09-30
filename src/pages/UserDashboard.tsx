@@ -4,6 +4,7 @@ import { Modal } from '../components/Modal'
 import { SearchBox } from '../components/SearchBox'
 import { DateRangeFilter } from '../components/DateRangeFilter'
 import { StatusBadge } from '../components/StatusBadge'
+import { KanbanBoard } from '../components/KanbanBoard'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import {
@@ -63,6 +64,7 @@ export function UserDashboard() {
   const [search, setSearch] = useState('')
   const [createdDateFilter, setCreatedDateFilter] = useState(DEFAULT_CREATED_DATE_FILTER)
   const [ticketFilter, setTicketFilter] = useState<MyTicketFilter>('all')
+  const [ticketViewMode, setTicketViewMode] = useState<'table' | 'board'>('board')
 
   const [departmentId, setDepartmentId] = useState('')
   const [subject, setSubject] = useState('')
@@ -648,6 +650,25 @@ export function UserDashboard() {
       <section className="card" style={{ marginTop: '1.25rem' }}>
         <div className="toolbar">
           <h2 style={{ margin: 0 }}>My tickets</h2>
+          <div className="view-toggle">
+            <button
+              type="button"
+              className={`view-toggle-btn ${ticketViewMode === 'board' ? 'active' : ''}`}
+              onClick={() => {
+                setTicketFilter('all')
+                setTicketViewMode('board')
+              }}
+            >
+              ▦ Board
+            </button>
+            <button
+              type="button"
+              className={`view-toggle-btn ${ticketViewMode === 'table' ? 'active' : ''}`}
+              onClick={() => setTicketViewMode('table')}
+            >
+              ☰ Table
+            </button>
+          </div>
           <SearchBox
             value={search}
             onChange={setSearch}
@@ -655,7 +676,7 @@ export function UserDashboard() {
           />
         </div>
         <DateRangeFilter value={createdDateFilter} onChange={setCreatedDateFilter} />
-        <div className="filter-tabs" style={{ margin: '0.75rem 0' }}>
+        {ticketViewMode === 'table' && <div className="filter-tabs" style={{ margin: '0.75rem 0' }}>
           {(
             [
               ['all', 'All'],
@@ -674,7 +695,7 @@ export function UserDashboard() {
               {label}
             </button>
           ))}
-        </div>
+        </div>}
         {loading ? (
           <p className="muted">Loading…</p>
         ) : tickets.length === 0 ? (
@@ -682,6 +703,11 @@ export function UserDashboard() {
         ) : filteredTickets.length === 0 ? (
           <p className="empty-hint">No tickets match this filter / search.</p>
         ) : (
+          ticketViewMode === 'board' ? (
+            <div style={{ marginTop: '0.75rem' }}>
+              <KanbanBoard tickets={filteredTickets} onSelectTicket={undefined} />
+            </div>
+          ) : (
           <div className="table-wrap" style={{ marginTop: '0.75rem' }}>
             <table>
               <thead>
@@ -810,6 +836,7 @@ export function UserDashboard() {
               </tbody>
             </table>
           </div>
+          )
         )}
       </section>
 

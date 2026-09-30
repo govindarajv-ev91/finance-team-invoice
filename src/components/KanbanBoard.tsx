@@ -16,7 +16,7 @@ const COLUMN_ORDER: TicketStatus[] = [
 
 interface KanbanBoardProps {
   tickets: Ticket[]
-  onSelectTicket: (ticket: Ticket) => void
+  onSelectTicket?: (ticket: Ticket) => void
 }
 
 export function KanbanBoard({ tickets, onSelectTicket }: KanbanBoardProps) {
@@ -68,7 +68,7 @@ export function KanbanBoard({ tickets, onSelectTicket }: KanbanBoardProps) {
                 <KanbanCard
                   key={t.id}
                   ticket={t}
-                  onClick={() => onSelectTicket(t)}
+                  onClick={onSelectTicket ? () => onSelectTicket(t) : undefined}
                 />
               ))
             )}
@@ -86,13 +86,13 @@ function KanbanCard({
   onClick,
 }: {
   ticket: Ticket
-  onClick: () => void
+  onClick?: () => void
 }) {
   const isUrgent = t.urgent || !!t.remaining_requested_at
 
   return (
     <div
-      className={`kanban-card${isUrgent ? ' card-urgent' : ''}`}
+      className={`kanban-card${isUrgent ? ' card-urgent' : ''}${onClick ? '' : ' kanban-card-static'}`}
       onClick={onClick}
     >
       {/* Top row: code + badges */}
