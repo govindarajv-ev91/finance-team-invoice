@@ -85,6 +85,7 @@ export function UserDashboard() {
   const [requestingId, setRequestingId] = useState<string | null>(null)
 
   const [ticketPopup, setTicketPopup] = useState<string | null>(null)
+  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null)
   const [completeTicket, setCompleteTicket] = useState<Ticket | null>(null)
   const [completionRemark, setCompletionRemark] = useState('')
   const [completionFile, setCompletionFile] = useState<File | null>(null)
@@ -731,7 +732,7 @@ export function UserDashboard() {
         ) : (
           ticketViewMode === 'board' ? (
             <div style={{ marginTop: '0.75rem' }}>
-              <KanbanBoard tickets={filteredTickets} onSelectTicket={undefined} />
+              <KanbanBoard tickets={filteredTickets} onSelectTicket={setSelectedTicket} />
             </div>
           ) : (
           <div className="table-wrap" style={{ marginTop: '0.75rem' }}>
@@ -919,6 +920,130 @@ export function UserDashboard() {
               </button>
             </div>
           </form>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!selectedTicket}
+        title={selectedTicket ? `Ticket ${selectedTicket.ticket_code}` : 'Ticket details'}
+        onClose={() => setSelectedTicket(null)}
+        wide
+      >
+        {selectedTicket && (
+          <div className="stack-form">
+            <div className="btn-row" style={{ marginBottom: '0.5rem' }}>
+              <StatusBadge status={selectedTicket.status} />
+              {(selectedTicket.urgent || selectedTicket.remaining_requested_at) && (
+                <span className="urgent-badge">URGENT</span>
+              )}
+              <span className={`priority-badge priority-${selectedTicket.priority || 'medium'}`}>
+                {priorityLabel(selectedTicket.priority)}
+              </span>
+            </div>
+
+            <h4 className="detail-section-title">Amounts</h4>
+            <div className="info-grid">
+              <div><span>Invoice amount</span><strong>{formatCurrency(Number(selectedTicket.amount))}</strong></div>
+              <div>
+                <span>Payable this cycle</span>
+                <strong>
+                  {formatCurrency(getPayableTarget(selectedTicket))}
+                  {selectedTicket.payable_percent != null && !selectedTicket.remaining_requested_at
+                    ? ` (${selectedTicket.payable_percent}%)`
+                    : ''}
+                </strong>
+              </div>
+              <div><span>Paid amount</span><strong>{formatCurrency(getPaidTotal(selectedTicket))}</strong></div>
+              <div><span>Still to pay now</span><strong>{formatCurrency(getPendingAmount(selectedTicket))}</strong></div>
+              <div><span>Invoice remaining</span><strong>{formatCurrency(getInvoiceRemaining(selectedTicket))}</strong></div>
+            </div>
+
+            <h4 className="detail-section-title">Invoice and department</h4>
+            <div className="info-grid">
+              <div><span>Department</span><strong>{selectedTicket.departments?.name ?? '—'}</strong></div>
+              <div><span>Subject</span><strong>{selectedTicket.subject}</strong></div>
+              <div><span>Purpose</span><strong>{selectedTicket.purpose ?? '—'}</strong></div>
+              <div><span>Invoice number</span><strong>{selectedTicket.invoice_number ?? '—'}</strong></div>
+              <div><span>Created</span><strong>{formatDateTime(selectedTicket.created_at)}</strong></div>
+              <div><span>Due</span><strong>{selectedTicket.due_at ? formatDateTime(selectedTicket.due_at) : '—'}</strong></div>
+              <div><span>Bank</span><strong>{selectedTicket.bank_name ?? '—'}</strong></div>
+              <div><span>Account number</span><strong>{selectedTicket.account_number ?? '—'}</strong></div>
+              <div><span>IFSC</span><strong>{selectedTicket.ifsc_code ?? '—'}</strong></div>
+            </div>
+
+            <h4 className="detail-section-title">Approvals and payment</h4>
+            <div className="info-grid">
+              <div>
+                <span>Team Head approval</span>
+                <strong>{selectedTicket.team_head_approved_by_name ?? 'Not approved yet'}</strong>
+                <span className="muted tiny">
+                  {selectedTicket.team_head_approved_at
+                    ? formatDateTime(selectedTicket.team_head_approved_at)
+                    : '—'}
+                </span>
+                {selectedTicket.team_head_remark && <span className="muted tiny">{selectedTicket.team_head_remark}</span>}
+              </div>
+              <div>
+                <span>CEO approval</span>
+                <strong>{selectedTicket.ceo_approved_by_name ?? 'Not approved yet'}</strong>
+                <span className="muted tiny">
+                  {selectedTicket.ceo_approved_at ? formatDateTime(selectedTicket.ceo_approved_at) : '—'}
+                </span>
+                {selectedTicket.ceo_remark && <span className="muted tiny">{selectedTicket.ceo_remark}</span>}
+              </div>
+              <div>
+                <span>Finance payment</span>
+                <strong>{selectedTicket.paid_by_name ?? 'Not paid yet'}</strong>
+                <span className="muted tiny">
+                  {selectedTicket.paid_at ? formatDateTime(selectedTicket.paid_at) : '—'}
+                </span>
+                {selectedTicket.utr_number && <span className="muted tiny">UTR: {selectedTicket.utr_number}</span>}
+              </div>
+              <div>
+                <span>Completion</span>
+                <strong>
+                  {selectedTicket.completed_at ? formatDateTime(selectedTicket.completed_at) : 'Not completed'}
+                </strong>
+                {selectedTicket.completion_remark && (
+                  <span className="muted tiny">{selectedTicket.completion_remark}</span>
+                )}
+              </div>
+            </div>
+
+            {selectedTicket.remark && (
+              <>
+                <h4 className="detail-section-title">Remark</h4>
+                <p className="popup-lead">{selectedTicket.remark}</p>
+              </>
+            )}
+
+            <h4 className="detail-section-title">Attachments</h4>
+            <div className="btn-row" style={{ flexWrap: 'wrap' }}>
+              <a className="btn btn-ghost btn-sm" href={getPublicUrl(selectedTicket.bill_path)} target="_blank" rel="noreferrer">
+                Invoice
+              </a>
+              {selectedTicket.user_cheque_path && (
+                <a className="btn btn-ghost btn-sm" href={getPublicUrl(selectedTicket.user_cheque_path)} target="_blank" rel="noreferrer">
+                  User cheque
+                </a>
+              )}
+              {selectedTicket.cheque_path && (
+                <a className="btn btn-ghost btn-sm" href={getPublicUrl(selectedTicket.cheque_path)} target="_blank" rel="noreferrer">
+                  Pay cheque
+                </a>
+              )}
+              {selectedTicket.completion_path && (
+                <a className="btn btn-ghost btn-sm" href={getPublicUrl(selectedTicket.completion_path)} target="_blank" rel="noreferrer">
+                  Completion file
+                </a>
+              )}
+            </div>
+            <div className="btn-row">
+              <button type="button" className="btn btn-primary" onClick={() => setSelectedTicket(null)}>
+                Close
+              </button>
+            </div>
+          </div>
         )}
       </Modal>
     </Layout>

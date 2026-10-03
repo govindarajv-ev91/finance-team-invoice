@@ -4,6 +4,7 @@ import { Modal } from '../components/Modal'
 import { SearchBox } from '../components/SearchBox'
 import { DateRangeFilter } from '../components/DateRangeFilter'
 import { StatusBadge } from '../components/StatusBadge'
+import { KanbanBoard } from '../components/KanbanBoard'
 import {
   StatusOverview,
   ticketMatchesStatusFilter,
@@ -55,6 +56,7 @@ export function FinanceDashboard() {
   const [filter, setFilter] = useState<StatusFilter>('pending')
   const [search, setSearch] = useState('')
   const [createdDateFilter, setCreatedDateFilter] = useState(DEFAULT_CREATED_DATE_FILTER)
+  const [ticketViewMode, setTicketViewMode] = useState<'table' | 'board'>('table')
 
   const [payTicket, setPayTicket] = useState<Ticket | null>(null)
   const [payerName, setPayerName] = useState('')
@@ -287,17 +289,43 @@ export function FinanceDashboard() {
       <DateRangeFilter value={createdDateFilter} onChange={setCreatedDateFilter} />
 
       <section className="card">
-        <h2>Invoice list</h2>
-        <p className="muted">
-          Pay against the <strong>payable amount</strong> (advance %). Partial pays within that
-          cycle stay open. Select the <strong>payment date</strong> when confirming pay.
-        </p>
+        <div className="toolbar">
+          <div>
+            <h2 style={{ marginBottom: '0.35rem' }}>Invoice list</h2>
+            <p className="muted" style={{ marginBottom: 0 }}>
+              Pay against the <strong>payable amount</strong> (advance %). Partial pays within that
+              cycle stay open. Select the <strong>payment date</strong> when confirming pay.
+            </p>
+          </div>
+          <div className="view-toggle">
+            <button
+              type="button"
+              className={`view-toggle-btn ${ticketViewMode === 'board' ? 'active' : ''}`}
+              aria-pressed={ticketViewMode === 'board'}
+              onClick={() => setTicketViewMode('board')}
+            >
+              ▦ Board
+            </button>
+            <button
+              type="button"
+              className={`view-toggle-btn ${ticketViewMode === 'table' ? 'active' : ''}`}
+              aria-pressed={ticketViewMode === 'table'}
+              onClick={() => setTicketViewMode('table')}
+            >
+              ☰ Table
+            </button>
+          </div>
+        </div>
         {loading ? (
           <p className="muted">Loading…</p>
         ) : tickets.length === 0 ? (
           <p className="empty-hint">No invoices yet.</p>
         ) : filteredTickets.length === 0 ? (
           <p className="empty-hint">No invoices match “{search}” / this filter.</p>
+        ) : ticketViewMode === 'board' ? (
+          <div style={{ marginTop: '0.75rem' }}>
+            <KanbanBoard tickets={filteredTickets} />
+          </div>
         ) : (
           <div className="table-wrap">
             <table>
