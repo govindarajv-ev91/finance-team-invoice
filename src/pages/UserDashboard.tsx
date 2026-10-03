@@ -59,6 +59,7 @@ export function UserDashboard() {
   const [departments, setDepartments] = useState<Department[]>([])
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [loading, setLoading] = useState(true)
+  const [isRequestFormOpen, setIsRequestFormOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
   const [search, setSearch] = useState('')
@@ -104,7 +105,7 @@ export function UserDashboard() {
     if (ticketRes.error) setError(ticketRes.error.message)
     setDepartments(deptRes.data ?? [])
     setTickets((ticketRes.data as Ticket[]) ?? [])
-    const myDept = profile?.department_id || deptRes.data?.[0]?.id || ''
+    const myDept = profile?.department_id || ''
     setDepartmentId(myDept)
     setLoading(false)
   }, [user, profile?.department_id])
@@ -292,6 +293,7 @@ export function UserDashboard() {
       setIfscCode('')
       setBillFile(null)
       setChequeBookFile(null)
+      setIsRequestFormOpen(false)
       await loadData()
     } catch (err) {
       setError(getErrorMessage(err, 'Failed to save ticket'))
@@ -467,23 +469,37 @@ export function UserDashboard() {
         <p className={error ? 'form-error' : 'form-success'}>{error || info}</p>
       )}
       <section className="card">
-        <h2>New invoice request</h2>
-        <p className="muted">
-          Choose <strong>advance % (20–60)</strong> or tick <strong>Pay full invoice amount</strong> when
-          the entire bill must be paid in one go. Finance pays only after approvals.
-        </p>
-        <form className="form-grid" onSubmit={onCreate}>
+        <div className="toolbar">
+          <h2>New invoice request</h2>
+          {!isRequestFormOpen && (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => setIsRequestFormOpen(true)}
+            >
+              New request
+            </button>
+          )}
+        </div>
+        {isRequestFormOpen && (
+          <>
+            <p className="muted">
+              Choose <strong>advance % (20–60)</strong> or tick <strong>Pay full invoice amount</strong> when
+              the entire bill must be paid in one go. Finance pays only after approvals.
+            </p>
+            <form className="form-grid" onSubmit={onCreate}>
           <label>
             Department
-            <input
-              type="text"
-              readOnly
-              value={
-                profile?.departments?.name ||
-                departments.find((d) => d.id === departmentId)?.name ||
-                'Not assigned'
-              }
-            />
+            <select
+              required
+              value={departmentId}
+              onChange={(e) => setDepartmentId(e.target.value)}
+            >
+              <option value="" disabled>Select department</option>
+              {departments.map((department) => (
+                <option key={department.id} value={department.id}>{department.name}</option>
+              ))}
+            </select>
           </label>
           <label>
             Subject name
@@ -641,10 +657,20 @@ export function UserDashboard() {
           </label>
           <div className="full">
             <button type="submit" className="btn btn-primary" disabled={saving}>
-              {saving ? 'Saving…' : 'Save ticket'}
+              {saving ? 'Submitting…' : 'Submit request'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={saving}
+              onClick={() => setIsRequestFormOpen(false)}
+            >
+              Cancel
             </button>
           </div>
-        </form>
+            </form>
+          </>
+        )}
       </section>
 
       <section className="card" style={{ marginTop: '1.25rem' }}>
